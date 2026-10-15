@@ -529,7 +529,11 @@ struct PlaybackCommands: Commands {
                 }
             }
             Divider()
-            Toggle("Video Mode", isOn: Binding(get: { VideoController.shared.videoMode }, set: { VideoController.shared.videoMode = $0 }))
+            // Same as the Song/Video switch: also switches the playing song to its other version.
+            Toggle("Video Mode", isOn: Binding(get: { VideoController.shared.videoMode }, set: { on in
+                if player.current.map({ !$0.isLocal }) ?? false { SongVideoToggle.select(video: on) }
+                else { VideoController.shared.videoMode = on }
+            }))
             Button(player.smartShuffle ? String(localized: "Turn Off Smart Shuffle") : String(localized: "Smart Shuffle")) {
                 if !player.shuffle { player.cycleShuffle() }
                 player.cycleShuffle()
