@@ -1,0 +1,24 @@
+name: Bug report
+description: Something looks or works wrong
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: YT Musicfast version
+      description: Settings → General → About
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Steps to reproduce help a lot. Screenshots are welcome — please hide anything personal.
+    validations:
+      required: true

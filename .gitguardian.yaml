@@ -1,0 +1,6 @@
+# Test fixtures are captured, signed-out YouTube Music responses. Their "key", "token" and
+# "feedbackToken" fields are base64-encoded public IDs (e.g. a video id), not credentials.
+version: 2
+secret:
+  ignored_paths:
+    - "YTMusicfastTests/Fixtures/**"

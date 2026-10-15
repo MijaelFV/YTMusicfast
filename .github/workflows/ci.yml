@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+# macOS runner minutes are free for public repositories but billed (at 10×) for private ones, so
+# while the repository is private only manual runs happen ("Run workflow" in the Actions tab).
+jobs:
+  build-and-test:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name != 'schedule' && !github.event.repository.private)
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build and run tests
+        # Live network tests are opt-in (TEST_RUNNER_YTF_LIVE=1); CI runs the offline suite.
+        run: |
+          xcodebuild test \
+            -project YTMusicfast.xcodeproj \
+            -scheme YTMusicfast \
+            -destination 'platform=macOS' \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY=- \
+            | xcbeautify || exit ${PIPESTATUS[0]}
+
+  live-playback-check:
+    # Daily canary: tells you when YouTube has broken stream resolution, before users report it.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && !github.event.repository.private)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+      - run: brew install xcodegen && xcodegen generate
+      - name: Live resolver tests
+        env:
+          TEST_RUNNER_YTF_LIVE: "1"
+        run: |
+          xcodebuild test -project YTMusicfast.xcodeproj -scheme YTMusicfast \
+            -destination 'platform=macOS' -derivedDataPath build CODE_SIGN_IDENTITY=- \
+            -only-testing:YTMusicfastTests/LiveResolverTests

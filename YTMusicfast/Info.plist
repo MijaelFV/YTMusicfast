@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Sparkle updates: the feed lives on the latest GitHub release; updates are signed with the
+	     EdDSA key below (its private half is in the maintainer's Keychain). -->
+	<key>SUFeedURL</key>
+	<string>https://github.com/MijaelFV/YTMusicfast/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>ymK2Sfq5OlXmSpUoTdOWxxymd583PsqYFfvzML5wGDA=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<key>SUAllowsAutomaticUpdates</key>
+	<true/>
+	<!-- Install updates without asking by default (fixes for YouTube changes arrive on their own);
+	     Settings → Updates can turn it off. Sparkle installs on quit, never mid-song. -->
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<!-- ytmusicfast://watch?v=…, ytmusicfast://playlist?list=…, ytmusicfast://search?q=… -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.ytmusicfast.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>ytmusicfast</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Long recordings stream as HLS from this Mac's own loopback server (127.0.0.1). -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_ytf-together._tcp</string>
+		<string>_ytf-together._udp</string>
+		<string>_googlecast._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>YT Musicfast uses your local network to play on Chromecasts and Google TVs, to listen together with people nearby, and to let your phone control playback.</string>
+</dict>
+</plist>

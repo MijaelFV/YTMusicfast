@@ -1,0 +1,13 @@
+name: Feature idea
+description: Suggest something YT Musicfast should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like, and why?
+      description: |
+        YT Musicfast only talks to YouTube Music and your Mac — ideas that need extra accounts,
+        API keys or tokens for other services are out of scope.
+    validations:
+      required: true

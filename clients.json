@@ -1,0 +1,15 @@
+{
+  "_comment": "How YT Musicfast introduces itself to YouTube to get audio. If YouTube stops accepting it, put a working client here (yt-dlp's default clients are a good source) and push: every install picks it up within hours. Listed in order of preference; the app's built-in client is always tried last.",
+  "audio": [
+    {
+      "clientName": "VISIONOS",
+      "clientVersion": "1.02",
+      "clientNameId": "101",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+      "deviceMake": "Apple",
+      "deviceModel": "RealityDevice17,1",
+      "osName": "visionOS",
+      "osVersion": "26.5.23O471"
+    }
+  ]
+}

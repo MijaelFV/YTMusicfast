@@ -1,0 +1,10 @@
+.DS_Store
+build/
+DerivedData/
+*.xcodeproj/
+xcuserdata/
+build.log
+test.log
+dist/
+build-release.log
+.claude/

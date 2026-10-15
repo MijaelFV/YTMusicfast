@@ -1,0 +1,86 @@
+name: YTMusicfast
+options:
+  bundleIdPrefix: dev.ytmusicfast
+  developmentLanguage: en
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.10.0
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    # Sparkle compares build numbers, so they follow the version.
+    CURRENT_PROJECT_VERSION: "$(MARKETING_VERSION)"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    ENABLE_HARDENED_RUNTIME: NO
+    DEAD_CODE_STRIPPING: YES
+    # Translations live in YTMusicfast/Resources/Localizable.xcstrings.
+    SWIFT_EMIT_LOC_STRINGS: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+  configs:
+    Release:
+      # Strip symbols and the debug map from shipped binaries: smaller, and no build-machine paths.
+      DEPLOYMENT_POSTPROCESSING: YES
+      STRIP_INSTALLED_PRODUCT: YES
+targets:
+  YTMusicfast:
+    type: application
+    platform: macOS
+    sources:
+      - path: YTMusicfast
+        excludes: [Info.plist]
+    dependencies:
+      - package: Sparkle
+      # The `ytmusicfast` command-line tool ships inside the app (Contents/Helpers).
+      - target: ytmusicfast-cli
+        embed: true
+        codeSign: false
+        copy:
+          destination: wrapper
+          subpath: Contents/Helpers
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.ytmusicfast.app
+        # Shown as "YT Musicfast"; the module, scheme, repo and data folders keep "YTMusicfast".
+        PRODUCT_NAME: "YT Musicfast"
+        PRODUCT_MODULE_NAME: YTMusicfast
+        GENERATE_INFOPLIST_FILE: YES
+        # Extra keys merged into the generated Info.plist (Bonjour services for Listen Together).
+        INFOPLIST_FILE: YTMusicfast/Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: "YT Musicfast"
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.music
+        INFOPLIST_KEY_NSHumanReadableCopyright: "MIT License"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    scheme:
+      testTargets: [YTMusicfastTests]
+  ytmusicfast-cli:
+    type: tool
+    platform: macOS
+    sources:
+      - path: CLI
+    settings:
+      base:
+        PRODUCT_NAME: ytmusicfast
+        PRODUCT_BUNDLE_IDENTIFIER: dev.ytmusicfast.cli
+        SWIFT_EMIT_LOC_STRINGS: NO
+  YTMusicfastTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: YTMusicfastTests
+        excludes: [Fixtures]
+      - path: YTMusicfastTests/Fixtures
+        type: folder
+        buildPhase: resources
+      - YTMusicfast/Core
+      - YTMusicfast/Playback/StreamResolver.swift
+      - YTMusicfast/Playback/PremiumAudio.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.ytmusicfast.tests
+        GENERATE_INFOPLIST_FILE: YES

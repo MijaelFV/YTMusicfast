@@ -1,0 +1,52 @@
+name: Songs won't play
+description: Playback stopped working (usually YouTube changed something)
+labels: [playback]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        YouTube changes how its streams work from time to time. Before reporting, check that you're on the
+        latest release. If [yt-dlp](https://github.com/yt-dlp/yt-dlp) is installed (`brew install yt-dlp`),
+        YT Musicfast falls back to it automatically — try `brew upgrade yt-dlp` too.
+  - type: input
+    id: version
+    attributes:
+      label: YT Musicfast version
+      description: Settings → General → About
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: What fails?
+      options:
+        - Every song
+        - Some songs (please link one below)
+        - Music videos only
+        - Downloads
+    validations:
+      required: true
+  - type: dropdown
+    id: account
+    attributes:
+      label: Signed in?
+      options: ["Yes", "No", "Both fail"]
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: A link to a song that fails, the message in the player bar, and anything that changed.
+  - type: textarea
+    id: diagnose
+    attributes:
+      label: Output of `ytmusicfast diagnose <song link>`
+      description: |
+        Install the command-line tool from Settings → General → Command-line tool, then run it with a song that
+        fails. It lists format numbers and yes/no results only — no addresses or cookies.
+      render: text
