@@ -75,6 +75,32 @@ struct FragmentedMP4IndexTests {
         #expect(playlist.components(separatedBy: "\nhttps://cdn/").count - 1 == 15)
     }
 
+    /// For Cast devices (music videos): the header and each fragment are files of their own.
+    @Test func playlistWithHeaderFile() throws {
+        let index = try #require(FragmentedMP4.index(in: try header()))
+        let playlist = FragmentedMP4.playlist(for: index, mediaName: "audio", headerName: "audio-init.mp4") { "audio-\($0.offset).m4s" }
+        #expect(playlist.contains("#EXT-X-MAP:URI=\"audio-init.mp4\"\n"))
+        #expect(!playlist.contains("BYTERANGE"))
+        #expect(playlist.contains("\naudio-971.m4s\n"))
+    }
+
+    @Test func castFragmentsFromAFile() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("cast-\(UUID().uuidString).m4a")
+        try header().write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let fragments = CastFragments(file: file)
+        #expect(await fragments.load())
+        let playlist = try #require(await fragments.playlist(named: "audio"))
+        #expect(playlist.contains("#EXT-X-MAP:URI=\"audio-init.mp4\""))
+        #expect(playlist.components(separatedBy: ".m4s").count - 1 == 15)
+        // The header the device gets has the twice-the-length fix applied.
+        var fixed = try header().prefix(759)
+        FragmentedMP4.fixHeaderDurations(&fixed)
+        #expect(await fragments.header() == Data(fixed))
+        // Only fragments the index lists: nothing else of the file can be asked for.
+        #expect(await fragments.fragment(at: 500) == nil)
+    }
+
     @Test func noIndexNoPlaylist() {
         #expect(FragmentedMP4.index(in: Data("nothing here".utf8)) == nil)
     }

@@ -61,8 +61,18 @@ final class CastController {
     @ObservationIgnored private var sessionId: String?
     @ObservationIgnored private var mediaSessionId: Int?
     /// The song loaded on the receiver, to tell its "finished" from an older one's.
-    @ObservationIgnored private var loadedVideoId: String?
+    @ObservationIgnored private(set) var loadedVideoId: String?
+    /// What's loaded on the receiver, to load its sound alone instead if the video doesn't play.
+    @ObservationIgnored private var loadedTrack: Track?
+    @ObservationIgnored private var loadedAsVideo = false
+    /// The video loaded has played (so a later error is the stream's, not the device refusing it).
+    @ObservationIgnored private var videoPlayed = false
+    /// This device didn't play a music video: songs' sound only from now on, while connected.
+    @ObservationIgnored private var videoRefused = false
     @ObservationIgnored private var onReady: (() -> Void)?
+    /// Keeps this Mac from sleeping while casting: the device plays from its media server (the
+    /// Mac's own player is paused, so nothing else would).
+    @ObservationIgnored private var awake: NSObjectProtocol?
     /// What to resume locally if casting stops.
     @ObservationIgnored private var lastKnownPosition: TimeInterval = 0
     @ObservationIgnored private var loadGeneration = 0
@@ -142,6 +152,7 @@ final class CastController {
         if self.device?.id == device.id, state == .connected { return }
         if self.device != nil { disconnect(resumeLocally: false) }
         self.device = device
+        videoRefused = false
         state = .connecting
         let tls = NWProtocolTLS.Options()
         // Cast devices present a self-signed certificate (as with Google's own senders).
@@ -177,7 +188,11 @@ final class CastController {
         pendingPlaying = nil
         pendingSeek = nil
         loadedVideoId = nil
+        loadedTrack = nil
+        loadedAsVideo = false
         remotePlaying = false
+        if let awake { ProcessInfo.processInfo.endActivity(awake) }
+        awake = nil
         CastMediaServer.shared.stop()
         PlayerController.shared.castingEnded(at: position, playing: wasPlaying && resumeLocally)
     }
@@ -211,14 +226,24 @@ final class CastController {
 
     // MARK: Playing
 
+    /// Whether a song goes to the device as its music video (Video mode, a TV, and a device that
+    /// plays them), rather than as sound only.
+    func castsVideo(_ track: Track) -> Bool {
+        track.isVideo && !track.isLocal && VideoController.shared.videoMode && device?.isSpeaker == false && !videoRefused
+    }
+
     /// Loads a song on the receiver (the player calls this for every song while casting).
-    func load(_ track: Track, at position: TimeInterval, autoplay: Bool) {
+    /// `soundOnly`: its sound even if it's a music video (the video didn't play).
+    func load(_ track: Track, at position: TimeInterval, autoplay: Bool, soundOnly: Bool = false) {
         let position = position.isFinite ? max(0, position) : 0
         // A newer load (quick skips) makes this one stale: only the latest reaches the device.
         loadGeneration += 1
         let generation = loadGeneration
         // Shown at once; the device's own reports take over once it has the song.
         loadedVideoId = track.videoId
+        loadedTrack = track
+        loadedAsVideo = false
+        videoPlayed = false
         remoteTime = position
         remoteTimeAt = Date()
         remoteBuffering = true
@@ -235,17 +260,33 @@ final class CastController {
         let send = { [weak self] in
             guard let self, self.transportId != nil else { return }
             Task {
-                guard let url = try? await CastMediaServer.shared.url(for: track) else {
-                    self.fail(String(localized: "This Mac has no network address"))
-                    return
+                // A music video as HLS; its sound alone when it can't be (see CastVideo).
+                let video = !soundOnly && self.castsVideo(track) ? await CastMediaServer.shared.videoURL(for: track) : nil
+                guard generation == self.loadGeneration else { return }
+                let url: URL
+                if let video {
+                    url = video
+                } else {
+                    guard let sound = try? await CastMediaServer.shared.url(for: track) else {
+                        self.fail(String(localized: "This Mac has no network address"))
+                        return
+                    }
+                    url = sound
                 }
                 guard generation == self.loadGeneration, let transportId = self.transportId else { return }
                 var metadata: [String: Any] = ["metadataType": 3, "title": track.title, "artist": track.artistLine]
                 if let album = track.album?.name { metadata["albumName"] = album }
                 if let art = Artwork.url(track.thumbnail, size: 720) { metadata["images"] = [["url": art.absoluteString]] }
                 var media: [String: Any] = ["contentId": url.absoluteString, "contentType": "audio/mp4", "streamType": "BUFFERED", "metadata": metadata]
+                if video != nil {
+                    // Fragmented MP4 pieces (the receiver otherwise expects MPEG-TS from HLS).
+                    media["contentType"] = "application/x-mpegurl"
+                    media["hlsSegmentFormat"] = "fmp4"
+                    media["hlsVideoSegmentFormat"] = "fmp4"
+                    self.loadedAsVideo = true
+                }
                 if let duration = track.duration, duration.isFinite, duration > 0 { media["duration"] = duration }
-                castLog.notice("load \(track.videoId, privacy: .public) at \(position)")
+                castLog.notice("load \(track.videoId, privacy: .public) at \(position) as \(video == nil ? "sound" : "video", privacy: .public)")
                 self.loadRequestId = self.send(Namespace.media, ["type": "LOAD", "media": media, "autoplay": autoplay, "currentTime": position], to: transportId)
             }
         }
@@ -351,6 +392,7 @@ final class CastController {
                 castLog.notice("ignored \(type, privacy: .public) of an earlier load")
                 return
             }
+            if type == "LOAD_FAILED", loadedAsVideo { soundInstead(); return }
             fail(type)
         case (Namespace.receiver, "LAUNCH_ERROR"):
             fail(type)
@@ -361,6 +403,29 @@ final class CastController {
             break
         }
     }
+
+    /// The music video didn't play on the device: its sound instead, from the same point. A video
+    /// refused outright means this device doesn't take them (songs only from now on); one that
+    /// stopped partway was just that video's stream.
+    private func soundInstead() {
+        guard let track = loadedTrack else { return }
+        if !videoPlayed {
+            videoRefused = true
+            let name = device?.name ?? "the device"
+            Router.shared.showToast(String(localized: "\(name) can't show music videos: playing the sound"), icon: "video.slash")
+        }
+        castLog.notice("video \(track.videoId, privacy: .public) didn't play (played before: \(self.videoPlayed)): sound instead")
+        load(track, at: position, autoplay: remotePlaying, soundOnly: true)
+    }
+
+    #if DEBUG
+    /// For `ytmusicfast debug-cast`.
+    var debugState: [String: Any] {
+        ["device": device?.name ?? "", "state": "\(state)", "videoId": loadedVideoId ?? "", "asVideo": loadedAsVideo,
+         "videoRefused": videoRefused, "playing": remotePlaying, "buffering": remoteBuffering, "settling": settling,
+         "position": (position * 10).rounded() / 10, "session": mediaSessionId ?? -1]
+    }
+    #endif
 
     private func receiverStatus(_ json: [String: Any]) {
         let status = json["status"] as? [String: Any]
@@ -380,7 +445,12 @@ final class CastController {
         send(Namespace.connection, ["type": "CONNECT"], to: transport)
         let starting = state != .connected
         state = .connected
-        if starting { PlayerController.shared.castingStarted() }
+        if starting {
+            if awake == nil {
+                awake = ProcessInfo.processInfo.beginActivity(options: .idleSystemSleepDisabled, reason: "Casting to \(device?.name ?? "a Cast device")")
+            }
+            PlayerController.shared.castingStarted()
+        }
         onReady?()
         onReady = nil
     }
@@ -413,11 +483,15 @@ final class CastController {
             settling = false
         }
         if settling {
-            if playerState == "IDLE", status["idleReason"] as? String == "ERROR" { fail("ERROR"); return }
+            if playerState == "IDLE", status["idleReason"] as? String == "ERROR" {
+                if loadedAsVideo { soundInstead() } else { fail("ERROR") }
+                return
+            }
             remoteBuffering = true
             PlayerController.shared.castStatusChanged()
             return
         }
+        if playerState == "PLAYING", loadedAsVideo { videoPlayed = true }
         let reportedPlaying = playerState == "PLAYING" || playerState == "BUFFERING"
         // Until the device confirms a play or pause (or a few seconds pass), its older reports
         // don't flip the button back; the position waits too.
@@ -434,6 +508,7 @@ final class CastController {
         if playerState == "IDLE", let reason = status["idleReason"] as? String {
             switch reason {
             case "FINISHED": PlayerController.shared.castFinishedSong(loadedVideoId)
+            case "ERROR" where loadedAsVideo: soundInstead()
             case "ERROR": fail(reason)
             default: break
             }

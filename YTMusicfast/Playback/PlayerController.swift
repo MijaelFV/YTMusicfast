@@ -1375,8 +1375,23 @@ final class PlayerController {
 
     /// The Song/Video switch moved: the next song is matched to it again.
     func versionModeChanged() {
-        guard !CastController.shared.isActive else { return }
+        guard !CastController.shared.isActive else { prepareNextForCast(); return }
         resyncUpcoming()
+    }
+
+    /// Casting: the next song, in the mode you're in and its stream looked up, so it starts on the
+    /// device without waiting.
+    private func prepareNextForCast() {
+        guard let next = upNext.first else { return }
+        Task {
+            var entry = next
+            if Self.needsOtherVersion(entry), let other = await Self.otherVersion(of: entry, video: VideoController.shared.videoMode),
+               let at = queue.firstIndex(where: { $0.id == entry.id }), at != currentIndex {
+                entry = Self.entry(entry, as: other, video: VideoController.shared.videoMode)
+                queue[at] = entry
+            }
+            await CastMediaServer.shared.prepare(entry.track)
+        }
     }
 
     /// The switch was flipped back before the other version arrived.
@@ -1583,11 +1598,27 @@ final class PlayerController {
 
         // Casting: the device plays it (from this Mac's media server); nothing loads here.
         if CastController.shared.isActive {
-            CastController.shared.load(entry.track, at: pendingSeek ?? 0, autoplay: !startPausedOnce)
+            let position = pendingSeek ?? 0, autoplay = !startPausedOnce
             startPausedOnce = false
             pendingSeek = nil
+            if Self.needsOtherVersion(entry) {
+                // In the mode you're in (its music video in Video mode), found before the device
+                // loads anything, so it loads once. Usually already matched (see prepareNextForCast).
+                Task {
+                    let other = await Self.otherVersion(of: entry, video: VideoController.shared.videoMode)
+                    guard let index = currentIndex, queue.indices.contains(index), queue[index].id == entry.id,
+                          CastController.shared.isActive else { return }
+                    if let other {
+                        queue[index] = Self.entry(entry, as: other, video: VideoController.shared.videoMode)
+                        versionDidChange()
+                    }
+                    CastController.shared.load(queue[index].track, at: position, autoplay: autoplay)
+                }
+            } else {
+                CastController.shared.load(entry.track, at: position, autoplay: autoplay)
+            }
             trackDidChange()
-            if let upcoming = upNext.first?.track { Task { await CastMediaServer.shared.prepare(upcoming) } }
+            prepareNextForCast()
             return
         }
 

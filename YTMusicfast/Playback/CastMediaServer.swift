@@ -1,10 +1,14 @@
 import Foundation
 import Network
+import os
+
+private let mediaLog = Logger(subsystem: "dev.ytmusicfast", category: "Cast")
 
 /// Serves the song being cast to the Cast device, over the local network, from this Mac:
 /// downloads and replays from disk, local files, and everything else fetched from YouTube by the
 /// Mac (YouTube's stream addresses are tied to whoever asked for them, so the TV can't use them
-/// directly). Runs only while casting; every address carries a random secret.
+/// directly). Music videos go as HLS (see `CastVideo`). Runs only while casting; every address
+/// carries a random secret.
 @MainActor
 final class CastMediaServer {
     static let shared = CastMediaServer()
@@ -15,6 +19,8 @@ final class CastMediaServer {
     /// The songs the receiver may ask for, by video id.
     private var tracks: [String: Track] = [:]
     private var streams: [String: StreamInfo] = [:]
+    /// Music videos being cast (the playing one and the next), by video id.
+    private var videos: [String: CastVideo] = [:]
 
     private init() {}
 
@@ -28,10 +34,54 @@ final class CastMediaServer {
         return URL(string: "http://\(host):\(port)/cast/\(secret)/\(name)")!
     }
 
+    /// The address of a music video as HLS, or nil when it can't be cast as one (then its sound
+    /// is cast instead).
+    func videoURL(for track: Track) async -> URL? {
+        guard (try? await start()) != nil, let port, let host = PhoneRemote.localIPv4(), await video(for: track) != nil else { return nil }
+        let name = track.videoId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? track.videoId
+        return URL(string: "http://\(host):\(port)/cast/\(secret)/v/\(name)/index.m3u8")
+    }
+
+    private func video(for track: Track) async -> CastVideo? {
+        if let known = videos[track.videoId] { return known }
+        guard let (audio, codecs) = await audioFragments(for: track),
+              let video = await CastVideo.make(videoId: track.videoId, audio: audio, audioCodecs: codecs),
+              listener != nil else { return nil }
+        if videos.count >= 3 { videos = videos.filter { $0.key == CastController.shared.loadedVideoId } }
+        videos[track.videoId] = video
+        return video
+    }
+
+    /// A video's sound in fragments: the replay or download on this Mac (if it isn't Opus), or
+    /// YouTube's AAC.
+    private func audioFragments(for track: Track) async -> (CastFragments, String)? {
+        if let file = AudioCache.cachedFile(for: track.videoId), !WebMOpus.isOpus(file) {
+            let fragments = CastFragments(file: file)
+            if await fragments.load() { return (fragments, "mp4a.40.2") }
+        }
+        let videoId = track.videoId
+        var info = streams[videoId].flatMap { $0.isExpired ? nil : $0 }
+        if info == nil { info = try? await ChainedStreamResolver.shared.resolve(videoId: videoId) }
+        guard let info, info.mimeType.hasPrefix("audio/mp4") else { return nil }
+        streams[videoId] = info
+        let codecs = info.mimeType.range(of: "codecs=\"").flatMap { start in
+            info.mimeType[start.upperBound...].split(separator: "\"").first.map(String.init)
+        } ?? "mp4a.40.2"
+        let fragments = CastFragments(remote: info.url, mimeType: "audio/mp4") {
+            await CastMediaServer.shared.refreshStream(videoId)?.url
+        }
+        return (fragments, codecs)
+    }
+
     /// Looks up the next song's stream ahead of time, so a skip while casting doesn't wait for
-    /// YouTube. One request per song, only while casting.
+    /// YouTube. One request per song (a few for a music video), only while casting.
     func prepare(_ track: Track) async {
-        guard listener != nil, track.localPath == nil, streams[track.videoId] == nil else { return }
+        guard listener != nil, track.localPath == nil else { return }
+        if CastController.shared.castsVideo(track) {
+            _ = await video(for: track)
+            return
+        }
+        guard streams[track.videoId] == nil else { return }
         if let file = AudioCache.cachedFile(for: track.videoId), !WebMOpus.isOpus(file) { return }
         guard let info = try? await ChainedStreamResolver.shared.resolve(videoId: track.videoId) else { return }
         streams[track.videoId] = info
@@ -43,6 +93,7 @@ final class CastMediaServer {
         port = nil
         tracks = [:]
         streams = [:]
+        videos = [:]
     }
 
     private func start() async throws {
@@ -101,7 +152,18 @@ final class CastMediaServer {
             guard let colon = line.firstIndex(of: ":") else { return nil }
             return (line[..<colon].lowercased(), line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces))
         }, uniquingKeysWith: { first, _ in first })
+        // The receiver is a web page: it may check first that it's allowed to ask.
+        if parts.first == "OPTIONS" {
+            send(status: "204 No Content", headers: ["Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+                                                     "Access-Control-Allow-Headers": "Range, Content-Type"], body: Data(), on: connection)
+            return
+        }
         let path = parts.count > 1 ? String(parts[1]).split(separator: "/").map(String.init) : []
+        if parts.count > 1, path.count == 5, path[0] == "cast", path[1] == secret, path[2] == "v" {
+            await respondVideo(videoId: path[3].removingPercentEncoding ?? path[3], file: path[4], range: headers["range"],
+                               head: parts[0] == "HEAD", on: connection)
+            return
+        }
         guard parts.count > 1, path.count == 3, path[0] == "cast", path[1] == secret,
               let videoId = path[2].removingPercentEncoding, let track = tracks[videoId] else {
             send(status: "404 Not Found", headers: [:], body: Data(), on: connection)
@@ -140,6 +202,34 @@ final class CastMediaServer {
             }
             connection.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in connection.cancel() })
         }
+    }
+
+    /// A playlist, header or fragment of a music video (small enough to send in one go).
+    private func respondVideo(videoId: String, file: String, range rangeHeader: String?, head: Bool, on connection: NWConnection) async {
+        guard let video = videos[videoId] else {
+            send(status: "404 Not Found", headers: [:], body: Data(), on: connection)
+            return
+        }
+        guard let (data, mimeType) = await video.file(file) else {
+            mediaLog.notice("video \(videoId, privacy: .public): \(file, privacy: .public) unavailable")
+            send(status: "502 Bad Gateway", headers: [:], body: Data(), on: connection)
+            return
+        }
+        guard let range = ByteRange.parse(rangeHeader, length: data.count, limit: .max) else {
+            send(status: "416 Range Not Satisfiable", headers: ["Content-Range": "bytes */\(data.count)"], body: Data(), on: connection)
+            return
+        }
+        var headers = ["Content-Type": mimeType, "Accept-Ranges": "bytes"]
+        let body = rangeHeader == nil ? data : data.subdata(in: range.lowerBound..<(range.upperBound + 1))
+        if rangeHeader != nil { headers["Content-Range"] = "bytes \(range.lowerBound)-\(range.upperBound)/\(data.count)" }
+        let status = rangeHeader == nil ? "200 OK" : "206 Partial Content"
+        mediaLog.debug("video \(videoId, privacy: .public): \(file, privacy: .public) \(body.count) bytes")
+        guard !head else {
+            headers["Content-Length"] = "\(body.count)"
+            connection.send(content: Self.head(status: status, headers: headers), completion: .contentProcessed { _ in connection.cancel() })
+            return
+        }
+        send(status: status, headers: headers, body: body, on: connection)
     }
 
     private func refreshStream(_ videoId: String) async -> StreamInfo? {
@@ -185,6 +275,79 @@ final class CastMediaServer {
         await withCheckedContinuation { continuation in
             connection.send(content: data, completion: .contentProcessed { error in continuation.resume(returning: error == nil) })
         }
+    }
+}
+
+/// A music video for the Cast device, as HLS made from YouTube's separate picture (H.264 up to
+/// 1080p, every size, so the device picks by its screen and connection) and sound (AAC). Cast
+/// devices can't use YouTube's own playlists or fragments (YouTube doesn't let other web pages
+/// read them), so this Mac relays them a fragment at a time as the device asks: a few Mbps over
+/// the local network, only while a video is being cast.
+final class CastVideo: @unchecked Sendable {
+    private let master: String
+    private let parts: [String: CastFragments]
+
+    /// Nil when there's nothing a Cast device plays (no H.264, or no index to cut fragments by).
+    static func make(videoId: String, audio: CastFragments, audioCodecs: String) async -> CastVideo? {
+        guard let formats = try? await ChainedStreamResolver.shared.videoFormats(videoId: videoId) else { return nil }
+        var bySize: [Int: VideoFormat] = [:]
+        for format in formats where format.codecs.hasPrefix("avc1") && format.height <= 1080 {
+            if let known = bySize[format.height], known.fps >= format.fps { continue }
+            bySize[format.height] = format
+        }
+        // Tiny sizes only when there's nothing else (a TV would show them blurred).
+        if bySize.keys.contains(where: { $0 >= 360 }) { bySize = bySize.filter { $0.key >= 360 } }
+        guard !bySize.isEmpty else { return nil }
+        let renditions = bySize.values.map { format in
+            (format, CastFragments(remote: format.url, mimeType: "video/mp4") {
+                // Addresses expire after a few hours: the same size again, freshly asked for.
+                let fresh = try? await ChainedStreamResolver.shared.videoFormats(videoId: videoId)
+                return fresh?.first { $0.height == format.height && $0.codecs == format.codecs }?.url
+            })
+        }
+        // Every index at once (a few small reads), so the device's first requests don't wait.
+        async let audioReady = audio.load()
+        let loaded = await withTaskGroup(of: (VideoFormat, CastFragments)?.self) { group in
+            for (format, part) in renditions { group.addTask { await part.load() ? (format, part) : nil } }
+            var loaded: [(VideoFormat, CastFragments)] = []
+            for await result in group { if let result { loaded.append(result) } }
+            return loaded.sorted { $0.0.bitrate < $1.0.bitrate }
+        }
+        guard await audioReady, !loaded.isEmpty else { return nil }
+        var lines = [
+            "#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-INDEPENDENT-SEGMENTS",
+            "#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",NAME=\"Audio\",DEFAULT=YES,AUTOSELECT=YES,URI=\"audio.m3u8\"",
+        ]
+        var parts = ["audio": audio]
+        for (format, part) in loaded {
+            lines.append("#EXT-X-STREAM-INF:BANDWIDTH=\(max(format.bitrate, 1) + 130_000),RESOLUTION=\(format.width)x\(format.height),"
+                         + "CODECS=\"\(format.codecs),\(audioCodecs)\",FRAME-RATE=\(format.fps),AUDIO=\"audio\"")
+            lines.append("\(format.height).m3u8")
+            parts["\(format.height)"] = part
+        }
+        return CastVideo(master: lines.joined(separator: "\n") + "\n", parts: parts)
+    }
+
+    private init(master: String, parts: [String: CastFragments]) {
+        self.master = master
+        self.parts = parts
+    }
+
+    /// A file of the stream by its name: `index.m3u8` (every size), `<part>.m3u8`, `<part>-init.mp4`
+    /// (the header) or `<part>-<offset>.m4s` (a fragment), where a part is `audio` or a height.
+    func file(_ name: String) async -> (data: Data, mimeType: String)? {
+        if name == "index.m3u8" { return (Data(master.utf8), "application/vnd.apple.mpegurl") }
+        if name.hasSuffix(".m3u8") {
+            let part = String(name.dropLast(5))
+            guard let playlist = await parts[part]?.playlist(named: part) else { return nil }
+            return (Data(playlist.utf8), "application/vnd.apple.mpegurl")
+        }
+        let stem = name.split(separator: ".").first.map(String.init) ?? ""
+        guard let dash = stem.lastIndex(of: "-"), let part = parts[String(stem[..<dash])] else { return nil }
+        let what = stem[stem.index(after: dash)...]
+        if what == "init", name.hasSuffix(".mp4") { return await part.header().map { ($0, part.mimeType) } }
+        guard name.hasSuffix(".m4s"), let offset = Int(what) else { return nil }
+        return await part.fragment(at: offset).map { ($0, part.mimeType) }
     }
 }
 

@@ -144,12 +144,15 @@ extension FragmentedMP4 {
     /// An HLS playlist for the file at `mediaName`, made from its index: Apple's own streaming
     /// format, which AVFoundation loads a piece at a time. With `segmentURL`, each fragment is
     /// fetched from its own address instead of a byte range of `mediaName` (the header still is).
-    static func playlist(for index: Index, mediaName: String, segmentURL: ((Index.Segment) -> String)? = nil) -> String {
+    /// With `headerName`, the header is a file of its own too.
+    static func playlist(for index: Index, mediaName: String, headerName: String? = nil,
+                         segmentURL: ((Index.Segment) -> String)? = nil) -> String {
         let target = Int((index.segments.map(\.duration).max() ?? 10).rounded(.up))
         var lines = [
             "#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-TARGETDURATION:\(target)", "#EXT-X-PLAYLIST-TYPE:VOD",
             "#EXT-X-INDEPENDENT-SEGMENTS",
-            "#EXT-X-MAP:URI=\"\(mediaName)\",BYTERANGE=\"\(index.header.count)@\(index.header.lowerBound)\"",
+            headerName.map { "#EXT-X-MAP:URI=\"\($0)\"" }
+                ?? "#EXT-X-MAP:URI=\"\(mediaName)\",BYTERANGE=\"\(index.header.count)@\(index.header.lowerBound)\"",
         ]
         lines.reserveCapacity(lines.count + index.segments.count * 3 + 1)
         for segment in index.segments {
@@ -163,5 +166,100 @@ extension FragmentedMP4 {
         }
         lines.append("#EXT-X-ENDLIST")
         return lines.joined(separator: "\n") + "\n"
+    }
+}
+
+/// One fragmented MP4 (a size of a music video's picture, or its sound) served to a Cast device
+/// in its own fragments, cut by its index: from a file on this Mac or from YouTube.
+final class CastFragments: @unchecked Sendable {
+    let mimeType: String
+    private let lock = NSLock()
+    private var file: URL?
+    private var remote: URL?
+    private let refresh: @Sendable () async -> URL?
+    private var header = Data()
+    private var index: FragmentedMP4.Index?
+    private var loading: Task<Bool, Never>?
+
+    init(remote: URL, mimeType: String, refresh: @escaping @Sendable () async -> URL?) {
+        self.remote = remote
+        self.mimeType = mimeType
+        self.refresh = refresh
+    }
+
+    init(file: URL) {
+        self.file = file
+        mimeType = "audio/mp4"
+        refresh = { nil }
+    }
+
+    /// Reads the header and index once (64 KB covers hours; a longer index gets a bigger look).
+    func load() async -> Bool {
+        let task: Task<Bool, Never> = lock.withLock {
+            if let loading { return loading }
+            let task = Task { () -> Bool in
+                for size in [65_536, 1_048_576] {
+                    guard let head = await self.read(0...(size - 1)) else { return false }
+                    if let found = FragmentedMP4.index(in: head) {
+                        var header = head.prefix(found.header.upperBound)
+                        FragmentedMP4.fixHeaderDurations(&header)
+                        self.lock.withLock {
+                            self.header = Data(header)
+                            self.index = found
+                        }
+                        return true
+                    }
+                    if head.count < size { return false }
+                }
+                return false
+            }
+            loading = task
+            return task
+        }
+        let loaded = await task.value
+        if !loaded { lock.withLock { loading = nil } }
+        return loaded
+    }
+
+    func playlist(named name: String) async -> String? {
+        guard await load(), let index = lock.withLock({ self.index }) else { return nil }
+        return FragmentedMP4.playlist(for: index, mediaName: name, headerName: "\(name)-init.mp4") { "\(name)-\($0.offset).m4s" }
+    }
+
+    func header() async -> Data? {
+        guard await load() else { return nil }
+        return lock.withLock { header }
+    }
+
+    /// Only the fragments the index lists (the address names one by where it starts).
+    func fragment(at offset: Int) async -> Data? {
+        guard await load(), let segment = lock.withLock({ index?.segments.first { $0.offset == offset } }) else { return nil }
+        return await read(segment.offset...(segment.offset + segment.size - 1))
+    }
+
+    private func read(_ range: ClosedRange<Int>) async -> Data? {
+        let (file, remote) = lock.withLock { (self.file, self.remote) }
+        if let file {
+            guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+            defer { try? handle.close() }
+            try? handle.seek(toOffset: UInt64(range.lowerBound))
+            return try? handle.read(upToCount: range.count)
+        }
+        guard let remote else { return nil }
+        if let data = await Self.fetch(remote, range) { return data }
+        guard let fresh = await refresh() else { return nil }
+        lock.withLock { self.remote = fresh }
+        return await Self.fetch(fresh, range)
+    }
+
+    private static func fetch(_ url: URL, _ range: ClosedRange<Int>) async -> Data? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        components.queryItems = (components.queryItems ?? []) + [URLQueryItem(name: "range", value: "\(range.lowerBound)-\(range.upperBound)")]
+        guard let address = components.url else { return nil }
+        var request = URLRequest(url: address, timeoutInterval: 15)
+        request.setValue(InnerTube.safariUserAgent, forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) else { return nil }
+        return data
     }
 }

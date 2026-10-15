@@ -129,6 +129,26 @@ enum CommandServer {
                 return ok(await VideoController.diagnose(videoId: id, height: height, jumpTo: jump, noOutput: rest.contains("--no-output")))
             }
             return ok(await ChainedStreamResolver.shared.diagnose(videoId: id))
+        #if DEBUG
+        case "debug-cast":
+            // Casting from scripts: `debug-cast <device name>`, `debug-cast off`, `debug-cast status`.
+            let cast = CastController.shared
+            switch rest.joined(separator: " ") {
+            case "", "status": break
+            case "off": cast.disconnect()
+            case let name:
+                cast.startDiscovery()
+                defer { cast.stopDiscovery() }
+                for _ in 0..<30 where !cast.devices.contains(where: { $0.name == name }) { try? await Task.sleep(for: .milliseconds(250)) }
+                guard let device = cast.devices.first(where: { $0.name == name }) else {
+                    return fail("No Cast device named \(name) (found: \(cast.devices.map(\.name).joined(separator: ", ")))")
+                }
+                cast.cast(to: device)
+                for _ in 0..<30 where !cast.isActive { try? await Task.sleep(for: .milliseconds(250)) }
+            }
+            let data = (try? JSONSerialization.data(withJSONObject: cast.debugState, options: [.sortedKeys])) ?? Data()
+            return ok(String(decoding: data, as: UTF8.self))
+        #endif
         case "show":
             StatusBarController.showMainWindow()
         case "open":
