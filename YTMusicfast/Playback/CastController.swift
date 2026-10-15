@@ -191,6 +191,7 @@ final class CastController {
 
     /// Loads a song on the receiver (the player calls this for every song while casting).
     func load(_ track: Track, at position: TimeInterval, autoplay: Bool) {
+        let position = position.isFinite ? max(0, position) : 0
         let send = { [weak self] in
             guard let self, let transportId = self.transportId else { return }
             Task {
@@ -206,7 +207,7 @@ final class CastController {
                 if let album = track.album?.name { metadata["albumName"] = album }
                 if let art = Artwork.url(track.thumbnail, size: 720) { metadata["images"] = [["url": art.absoluteString]] }
                 var media: [String: Any] = ["contentId": url.absoluteString, "contentType": "audio/mp4", "streamType": "BUFFERED", "metadata": metadata]
-                if let duration = track.duration { media["duration"] = duration }
+                if let duration = track.duration, duration.isFinite, duration > 0 { media["duration"] = duration }
                 self.send(Namespace.media, ["type": "LOAD", "media": media, "autoplay": autoplay, "currentTime": position], to: transportId)
             }
         }
@@ -245,7 +246,12 @@ final class CastController {
             payload["requestId"] = requestId
             requestId += 1
         }
-        guard let json = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        // JSONSerialization raises an Objective-C exception (which `try?` doesn't catch) on NaN or
+        // infinite numbers: check first rather than take the app down.
+        guard JSONSerialization.isValidJSONObject(payload), let json = try? JSONSerialization.data(withJSONObject: payload) else {
+            castLog.error("not sent, invalid JSON: \(payload["type"] as? String ?? "?", privacy: .public)")
+            return
+        }
         let message = CastMessage(sourceId: Self.senderId, destinationId: destination, namespace: namespace,
                                   payload: String(decoding: json, as: UTF8.self))
         connection.send(content: message.framed(), completion: .contentProcessed { _ in })

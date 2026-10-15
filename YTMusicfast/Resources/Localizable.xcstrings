@@ -8224,12 +8224,12 @@
         }
       }
     },
-    "You're signing in on Google's own page. YT Musicfast never sees your password.": {
+    "You're signing in on Google's own page. YT Musicfast never sees your password. Passkeys can't be used here: use your password or your phone.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Estás iniciando sesión en la página de Google. YT Musicfast nunca ve tu contraseña."
+            "value": "Estás iniciando sesión en la página de Google. YT Musicfast nunca ve tu contraseña. Aquí no se pueden usar llaves de acceso: usa tu contraseña o tu teléfono."
           }
         }
       }

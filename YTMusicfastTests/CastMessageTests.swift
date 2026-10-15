@@ -31,6 +31,16 @@ struct CastMessageTests {
         #expect(ByteRange.parse("bytes=-10", length: 100, limit: 1000) == 90...99)
         #expect(ByteRange.parse("bytes=100-", length: 100, limit: 1000) == nil)
     }
+
+    /// The Cast server asks with no limit (Int.max): a receiver starting mid-song ("bytes=N-")
+    /// used to overflow and crash the app.
+    @Test func byteRangesWithoutLimit() {
+        #expect(ByteRange.parse("bytes=0-", length: 100, limit: .max) == 0...99)
+        #expect(ByteRange.parse("bytes=50-", length: 100, limit: .max) == 50...99)
+        #expect(ByteRange.parse("bytes=50-59", length: 100, limit: .max) == 50...59)
+        #expect(ByteRange.parse("bytes=-10", length: 100, limit: .max) == 90...99)
+        #expect(ByteRange.parse("bytes=5000000-", length: 9_000_000, limit: .max) == 5_000_000...8_999_999)
+    }
 }
 
 @Suite("Finding Cast devices (mDNS)")

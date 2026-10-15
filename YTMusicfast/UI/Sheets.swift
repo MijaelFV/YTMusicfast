@@ -162,7 +162,7 @@ struct SignInView: View {
                 Image(systemName: "lock.fill").foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Sign in with Google").font(.headline)
-                    Text("You're signing in on Google's own page. YT Musicfast never sees your password.")
+                    Text("You're signing in on Google's own page. YT Musicfast never sees your password. Passkeys can't be used here: use your password or your phone.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -204,8 +204,27 @@ struct GoogleSignInWebView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(onSignedIn: onSignedIn) }
 
+    /// Passkeys only work in an app's web view with an entitlement Apple grants to browsers, so
+    /// here WebAuthn exists but always fails, and Google would offer a passkey prompt that can't
+    /// finish. Hiding it makes Google offer what works: the password, a prompt on your phone, or
+    /// a code.
+    static let hidePasskeys = WKUserScript(source: """
+        (() => {
+          try { Object.defineProperty(window, 'PublicKeyCredential', { value: undefined, configurable: false }); } catch (e) {}
+          const credentials = navigator.credentials;
+          if (!credentials) return;
+          const refuse = () => Promise.reject(new DOMException('Passkeys are not available here', 'NotAllowedError'));
+          for (const name of ['get', 'create']) {
+            const original = credentials[name].bind(credentials);
+            credentials[name] = (options) => (options && options.publicKey) ? refuse() : original(options);
+          }
+        })();
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+
     func makeNSView(context: Context) -> WKWebView {
-        let webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController.addUserScript(Self.hidePasskeys)
+        let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.customUserAgent = InnerTube.safariUserAgent
         webView.navigationDelegate = context.coordinator
         context.coordinator.attach(to: webView)

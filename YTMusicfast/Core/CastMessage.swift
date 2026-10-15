@@ -106,7 +106,9 @@ enum ByteRange {
                 if let last = Int(parts[1]) { end = min(last, length - 1) }
             }
         }
-        guard start < length, start <= end else { return nil }
-        return start...min(end, start + limit - 1)
+        guard start < length, start <= end, limit > 0 else { return nil }
+        // With no real limit (Int.max), start + limit overflows: then the range's own end applies.
+        let (capped, overflow) = start.addingReportingOverflow(limit - 1)
+        return start...(overflow ? end : min(end, capped))
     }
 }
