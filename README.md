@@ -35,7 +35,9 @@ SwiftUI + AVFoundation. An 8 MB download, ~150 MB of RAM, 0% CPU when idle.</p>
 ## Install
 
 ```bash
-brew install --cask mijaelfv/tap/ytmusicfast
+brew tap mijaelfv/tap
+brew trust --cask mijaelfv/tap/ytmusicfast   # Homebrew 7 and later
+brew install --cask ytmusicfast
 ```
 
 Or download the DMG from [Releases](https://github.com/MijaelFV/YTMusicfast/releases/latest) and drag the app into

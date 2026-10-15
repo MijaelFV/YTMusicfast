@@ -20,7 +20,7 @@ APP_NAME=YTMusicfast          # project, scheme and file names
 DISPLAY_NAME="YT Musicfast"   # what users see (the .app and the DMG volume)
 BUILD_DIR=build/release
 DIST_DIR=dist
-TAP_REPO=MijaelFV/homebrew-tap   # Homebrew tap: brew install --cask mijaelfv/tap/ytmusicfast
+TAP_REPO=MijaelFV/homebrew-tap   # Homebrew tap (brew tap mijaelfv/tap)
 APP="$BUILD_DIR/Build/Products/Release/$DISPLAY_NAME.app"
 DMG="$DIST_DIR/$APP_NAME-$VERSION.dmg"
 

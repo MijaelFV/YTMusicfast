@@ -96,4 +96,4 @@ Run through this with the release build before publishing (about 30 minutes).
 - [ ] Bump `MARKETING_VERSION` in project.yml; write `release-notes/<version>.md` (shown in the update prompt and
       on the GitHub release).
 - [ ] `PUBLISH=1 scripts/release.sh` (also updates the cask in MijaelFV/homebrew-tap)
-- [ ] `brew upgrade --cask mijaelfv/tap/ytmusicfast` installs the new version.
+- [ ] `brew upgrade --cask ytmusicfast` installs the new version.
