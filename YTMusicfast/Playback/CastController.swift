@@ -283,6 +283,11 @@ final class CastController {
                     media["contentType"] = "application/x-mpegurl"
                     media["hlsSegmentFormat"] = "fmp4"
                     media["hlsVideoSegmentFormat"] = "fmp4"
+                    // As a video, not a music track: the receiver then shows the picture full screen
+                    // (its music layout shows the artwork over it, and its bar stays up).
+                    metadata["metadataType"] = 0
+                    metadata["subtitle"] = track.artistLine
+                    media["metadata"] = metadata
                     self.loadedAsVideo = true
                 }
                 if let duration = track.duration, duration.isFinite, duration > 0 { media["duration"] = duration }
@@ -491,6 +496,12 @@ final class CastController {
             PlayerController.shared.castStatusChanged()
             return
         }
+        // A video that stopped with an error: its sound instead, from where it was (before this
+        // report's idle 0:00 replaces that).
+        if playerState == "IDLE", status["idleReason"] as? String == "ERROR", loadedAsVideo {
+            soundInstead()
+            return
+        }
         if playerState == "PLAYING", loadedAsVideo { videoPlayed = true }
         let reportedPlaying = playerState == "PLAYING" || playerState == "BUFFERING"
         // Until the device confirms a play or pause (or a few seconds pass), its older reports
@@ -508,7 +519,6 @@ final class CastController {
         if playerState == "IDLE", let reason = status["idleReason"] as? String {
             switch reason {
             case "FINISHED": PlayerController.shared.castFinishedSong(loadedVideoId)
-            case "ERROR" where loadedAsVideo: soundInstead()
             case "ERROR": fail(reason)
             default: break
             }

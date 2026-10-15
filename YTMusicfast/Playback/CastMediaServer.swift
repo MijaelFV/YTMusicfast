@@ -45,11 +45,32 @@ final class CastMediaServer {
     private func video(for track: Track) async -> CastVideo? {
         if let known = videos[track.videoId] { return known }
         guard let (audio, codecs) = await audioFragments(for: track),
-              let video = await CastVideo.make(videoId: track.videoId, audio: audio, audioCodecs: codecs),
+              let video = await CastVideo.make(videoId: track.videoId, audio: audio, audioCodecs: codecs, pace: { [videoId = track.videoId] start in
+                  await CastMediaServer.shared.waitToFetch(videoId, from: start)
+              }),
               listener != nil else { return nil }
         if videos.count >= 3 { videos = videos.filter { $0.key == CastController.shared.loadedVideoId } }
         videos[track.videoId] = video
         return video
+    }
+
+    /// How far ahead of the TV's playback a video's fragments are fetched. YouTube refuses a
+    /// video's whole stream (sound too) once it's read about a minute ahead of real time, and the
+    /// receiver's player reads ahead as fast as it can: so fragments are handed over only as
+    /// playback nears them (the player just waits for them meanwhile).
+    private static let readAhead: TimeInterval = 30
+
+    /// Waits until the fragment starting at `start` seconds is within reach of playback (for a
+    /// video that isn't playing yet, the next one: its first seconds). False once it's no
+    /// longer being cast.
+    private func waitToFetch(_ videoId: String, from start: TimeInterval) async -> Bool {
+        while videos[videoId] != nil {
+            let cast = CastController.shared
+            let playhead = cast.loadedVideoId == videoId ? cast.position : 0
+            if start <= playhead + Self.readAhead { return true }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        return false
     }
 
     /// A video's sound in fragments: the replay or download on this Mac (if it isn't Opus), or
@@ -286,9 +307,12 @@ final class CastMediaServer {
 final class CastVideo: @unchecked Sendable {
     private let master: String
     private let parts: [String: CastFragments]
+    /// Waits until a fragment starting at this time (seconds) may be fetched; false: no longer wanted.
+    private let pace: @Sendable (Double) async -> Bool
 
     /// Nil when there's nothing a Cast device plays (no H.264, or no index to cut fragments by).
-    static func make(videoId: String, audio: CastFragments, audioCodecs: String) async -> CastVideo? {
+    static func make(videoId: String, audio: CastFragments, audioCodecs: String,
+                     pace: @escaping @Sendable (Double) async -> Bool) async -> CastVideo? {
         guard let formats = try? await ChainedStreamResolver.shared.videoFormats(videoId: videoId) else { return nil }
         var bySize: [Int: VideoFormat] = [:]
         for format in formats where format.codecs.hasPrefix("avc1") && format.height <= 1080 {
@@ -325,12 +349,13 @@ final class CastVideo: @unchecked Sendable {
             lines.append("\(format.height).m3u8")
             parts["\(format.height)"] = part
         }
-        return CastVideo(master: lines.joined(separator: "\n") + "\n", parts: parts)
+        return CastVideo(master: lines.joined(separator: "\n") + "\n", parts: parts, pace: pace)
     }
 
-    private init(master: String, parts: [String: CastFragments]) {
+    private init(master: String, parts: [String: CastFragments], pace: @escaping @Sendable (Double) async -> Bool) {
         self.master = master
         self.parts = parts
+        self.pace = pace
     }
 
     /// A file of the stream by its name: `index.m3u8` (every size), `<part>.m3u8`, `<part>-init.mp4`
@@ -346,7 +371,8 @@ final class CastVideo: @unchecked Sendable {
         guard let dash = stem.lastIndex(of: "-"), let part = parts[String(stem[..<dash])] else { return nil }
         let what = stem[stem.index(after: dash)...]
         if what == "init", name.hasSuffix(".mp4") { return await part.header().map { ($0, part.mimeType) } }
-        guard name.hasSuffix(".m4s"), let offset = Int(what) else { return nil }
+        guard name.hasSuffix(".m4s"), let offset = Int(what), let start = await part.startTime(ofFragmentAt: offset),
+              await pace(start) else { return nil }
         return await part.fragment(at: offset).map { ($0, part.mimeType) }
     }
 }

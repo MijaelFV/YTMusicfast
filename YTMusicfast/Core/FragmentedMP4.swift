@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// YouTube's audio comes as fragmented MP4: a header, then the music in many small fragments. Its
 /// header also states the song's full length (fragmented files normally say 0 there), and
@@ -231,6 +232,19 @@ final class CastFragments: @unchecked Sendable {
         return lock.withLock { header }
     }
 
+    /// Where in the recording the fragment at `offset` starts, in seconds (nil if not listed).
+    func startTime(ofFragmentAt offset: Int) async -> Double? {
+        guard await load() else { return nil }
+        return lock.withLock {
+            var time = 0.0
+            for segment in index?.segments ?? [] {
+                if segment.offset == offset { return time }
+                time += segment.duration
+            }
+            return nil
+        }
+    }
+
     /// Only the fragments the index lists (the address names one by where it starts).
     func fragment(at offset: Int) async -> Data? {
         guard await load(), let segment = lock.withLock({ index?.segments.first { $0.offset == offset } }) else { return nil }
@@ -258,8 +272,19 @@ final class CastFragments: @unchecked Sendable {
         guard let address = components.url else { return nil }
         var request = URLRequest(url: address, timeoutInterval: 15)
         request.setValue(InnerTube.safariUserAgent, forHTTPHeaderField: "User-Agent")
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) else { return nil }
-        return data
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(status) else {
+                fragmentsLog.notice("fragment \(range.lowerBound)-\(range.upperBound): HTTP \(status)")
+                return nil
+            }
+            return data
+        } catch {
+            fragmentsLog.notice("fragment \(range.lowerBound)-\(range.upperBound): \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 }
+
+private let fragmentsLog = Logger(subsystem: "dev.ytmusicfast", category: "Cast")
