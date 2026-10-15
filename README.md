@@ -5,7 +5,7 @@
 <h1 align="center">YT Musicfast</h1>
 
 <p align="center"><strong>A fast, native Mac app for YouTube Music.</strong><br>
-SwiftUI + AVFoundation. An 8 MB download, ~150 MB of RAM, 0% CPU when idle. No Electron.</p>
+SwiftUI + AVFoundation. An 8 MB download, ~150 MB of RAM, 0% CPU when idle.</p>
 
 <p align="center">
   <a href="https://github.com/MijaelFV/YTMusicfast/releases/latest"><strong>Download</strong></a> ·

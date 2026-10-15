@@ -55,7 +55,7 @@ text("YT Musicfast", 60, .bold, .white, at: NSPoint(x: 72, y: 318), kern: -1)
 text("A fast, native Mac app", 30, .medium, NSColor(white: 0.85, alpha: 1), at: NSPoint(x: 74, y: 268))
 text("for YouTube Music.", 30, .medium, NSColor(white: 0.85, alpha: 1), at: NSPoint(x: 74, y: 230))
 
-let facts = ["8 MB download", "~150 MB of RAM", "No Electron"]
+let facts = ["8 MB download", "~150 MB of RAM", "0% CPU when idle"]
 var y: CGFloat = 166
 for f in facts {
     NSColor(srgbRed: 0.94, green: 0.32, blue: 0.22, alpha: 1).setFill()
