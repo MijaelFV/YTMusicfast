@@ -38,13 +38,17 @@ else
 fi
 
 echo "==> Creating DMG"
+# dmgbuild lays out the window (background, size, icon positions) without scripting Finder;
+# it lives in a virtualenv under build/. The background comes from scripts/make-dmg-background.swift.
+DMGBUILD_ENV=build/dmgbuild-env
+if [[ ! -x "$DMGBUILD_ENV/bin/dmgbuild" ]]; then
+  python3 -m venv "$DMGBUILD_ENV"
+  "$DMGBUILD_ENV/bin/pip" install --quiet dmgbuild==1.6.7
+fi
 mkdir -p "$DIST_DIR"
-STAGING=$(mktemp -d)
-cp -R "$APP" "$STAGING/"
-ln -s /Applications "$STAGING/Applications"
 rm -f "$DMG"
-hdiutil create -volname "$DISPLAY_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG" >/dev/null
-rm -rf "$STAGING"
+"$DMGBUILD_ENV/bin/dmgbuild" -s scripts/dmg/settings.py -D app="$APP" -D background=scripts/dmg/background.png \
+  "$DISPLAY_NAME" "$DMG" >/dev/null
 
 if [[ -n "${SIGN_IDENTITY:-}" ]]; then
   codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
