@@ -174,6 +174,8 @@ final class PlayerController {
     @ObservationIgnored private var ramps: [PartialKeyPath<PlayerController>: Timer] = [:]
     /// What to do once the fade before a pause or skip ends.
     @ObservationIgnored private var afterFadeOut: (() -> Void)?
+    /// `afterFadeOut` is a pause (not a skip).
+    @ObservationIgnored private var fadingOutToPause = false
     @ObservationIgnored private let resolver = ChainedStreamResolver.shared
     @ObservationIgnored private var sources: [String: ChunkedAudioSource] = [:]
     @ObservationIgnored private var itemEntries: [ObjectIdentifier: UUID] = [:]
@@ -191,6 +193,11 @@ final class PlayerController {
     /// Bumped by every play request; a slow one (collection or playlist fetch) loses to a newer one.
     @ObservationIgnored private var latestRequest = 0
     @ObservationIgnored private var loadTask: Task<Void, Never>?
+    /// The queue entry whose sound is loading, until it starts (or stays paused). Meanwhile play
+    /// and pause only decide whether it starts once ready: the load carries on either way.
+    @ObservationIgnored private var loadingEntry: UUID?
+    /// The song loading starts paused once ready (pause pressed while it loads).
+    @ObservationIgnored private var loadStartsPaused = false
     /// When the last song change began, to tell a burst of skips from a single one.
     @ObservationIgnored private var lastStart = Date.distantPast
     @ObservationIgnored private var enqueueTask: Task<Void, Never>?
@@ -334,8 +341,7 @@ final class PlayerController {
                 Task { @MainActor in
                     // While casting, the device's state is what's shown, not this (silent) player's.
                     guard let self, deck === self.player, !CastController.shared.isActive else { return }
-                    self.isPlaying = deck.timeControlStatus != .paused
-                    self.isBuffering = deck.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                    self.showPlayerState()
                     self.watchForStall()
                     self.nowPlaying.updatePlayback()
                     ListenTogether.shared.playerChanged()
@@ -343,6 +349,24 @@ final class PlayerController {
                 }
             },
         ]
+    }
+
+    /// Playing / buffering as shown: the player's own state, except while a song loads, when it's
+    /// whether that song will start (see `loadingEntry`).
+    private func showPlayerState() {
+        if loadingEntry != nil {
+            isPlaying = !loadStartsPaused
+            isBuffering = !loadStartsPaused
+        } else {
+            isPlaying = player.timeControlStatus != .paused
+            isBuffering = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+        }
+    }
+
+    /// An item made for a song that won't play after all: no longer counted as that song's
+    /// (another item may later get the same identity).
+    private func forget(_ item: AVPlayerItem) {
+        itemEntries[ObjectIdentifier(item)] = nil
     }
 
     private func detach() {
@@ -555,7 +579,7 @@ final class PlayerController {
     private func startQueue(_ tracks: [Track], startAt index: Int = 0, shuffled: Bool? = nil, from context: BrowseTarget? = nil) {
         guard !tracks.isEmpty else { return }
         generation += 1
-        advanceWhenExtended = false
+        dropWaitingSkip()
         self.context = context
         contextTrackIds = context == nil ? [] : Set(tracks.map(\.videoId))
         continuationIsContext = false
@@ -807,18 +831,23 @@ final class PlayerController {
         }
         if fadingDeck != nil { finishCrossfade() }
         // Pressed again while fading out to pause: keep playing.
-        if afterFadeOut != nil {
+        if afterFadeOut != nil, fadingOutToPause {
             afterFadeOut = nil
+            fadingOutToPause = false
             ramp(\.transportLevel, to: 1, over: 0.05)
             return
         }
+        finishPendingSkip()
+        if loadingEntry != nil {
+            // Still loading: the press decides whether it starts once ready (shown at once);
+            // the load carries on either way, so playing again doesn't start over.
+            loadStartsPaused.toggle()
+            if loadStartsPaused { player.pause() }
+            showPlayerState()
+            nowPlaying.updatePlayback()
+            return
+        }
         if player.currentItem == nil {
-            // Still loading: pressing again means "don't start", not "load it again".
-            if isBuffering, let loadTask, !loadTask.isCancelled {
-                loadTask.cancel()
-                isBuffering = false
-                return
-            }
             startCurrent(keepingPendingSeek: true)
             return
         }
@@ -827,7 +856,10 @@ final class PlayerController {
                 self?.player.pause()
                 self?.transportLevel = 1
             }
+            fadingOutToPause = afterFadeOut != nil
         } else {
+            // Played again by hand: a later return of the connection mustn't restart it.
+            networkWait = nil
             transportLevel = 0
             applyVolume()
             player.play()
@@ -840,6 +872,7 @@ final class PlayerController {
     /// Fades out over 50 ms, then runs `action` (pause, or change songs). Immediate when nothing
     /// is audible, or when another fade-out is already waiting (fast repeated skips all count).
     private func fadeOut(then action: @escaping () -> Void) {
+        fadingOutToPause = false
         if let pending = afterFadeOut {
             afterFadeOut = nil
             stopRamp(\.transportLevel)
@@ -857,8 +890,19 @@ final class PlayerController {
         ramp(\.transportLevel, to: 0, over: 0.05) { [weak self] in
             guard let self, let action = self.afterFadeOut else { return }
             self.afterFadeOut = nil
+            self.fadingOutToPause = false
             action()
         }
+    }
+
+    /// A skip still fading out happens now, so a press right after it (play/pause, a seek)
+    /// applies to the song it lands on rather than the one leaving.
+    private func finishPendingSkip() {
+        guard let pending = afterFadeOut, !fadingOutToPause else { return }
+        afterFadeOut = nil
+        stopRamp(\.transportLevel)
+        transportLevel = 1
+        pending()
     }
 
     /// A skip: fade out, change songs, and fade the new one in.
@@ -918,16 +962,18 @@ final class PlayerController {
         // goes on from wherever it lands rather than being dropped.
         let chained = afterFadeOut != nil
         if index + 1 < queue.count {
-            // If the next track is already queued in AVQueuePlayer, advancing is instant and gapless.
-            if !chained, player.items().count > 1, let nextItem = player.items().dropFirst().first,
-               itemEntries[ObjectIdentifier(nextItem)] == queue[index + 1].id {
-                skipWithFade { [weak self] in
-                    self?.player.advanceToNextItem()
-                    self?.player.play()
-                }
-            } else {
-                skipWithFade { [weak self] in
-                    guard let self, let now = self.currentIndex, chained || now == index, now + 1 < self.queue.count else { return }
+            skipWithFade { [weak self] in
+                guard let self, let now = self.currentIndex, chained || now == index, now + 1 < self.queue.count else { return }
+                // Decided now, after the fade: the upcoming song may have been re-queued meanwhile
+                // (a Song/Video switch, a queue edit).
+                if self.player.items().count > 1, let nextItem = self.player.items().dropFirst().first,
+                   self.itemEntries[ObjectIdentifier(nextItem)] == self.queue[now + 1].id {
+                    // Already queued in AVQueuePlayer: advancing is instant and gapless.
+                    self.player.advanceToNextItem()
+                    self.player.play()
+                    // Now, not when the player reports it: a skip pressed right after goes on from here.
+                    self.currentItemChanged()
+                } else {
                     self.currentIndex = now + 1
                     self.startCurrent()
                 }
@@ -940,15 +986,25 @@ final class PlayerController {
         } else if extendingFor == generation {
             // More songs are already on their way.
             advanceWhenExtended = true
-        } else if autoplay, let last = queue.last {
+        } else if autoplay, !offlineMode, let last = queue.last {
             advanceWhenExtended = true
             Task { await appendRadio(seed: last.track.videoId, replacingUpcoming: false) }
         }
     }
 
+    /// Forgets a skip waiting for more songs, and the pause pressed meanwhile that it would have
+    /// carried over (or the next song you pick would start paused).
+    private func dropWaitingSkip() {
+        guard advanceWhenExtended else { return }
+        advanceWhenExtended = false
+        startPausedOnce = false
+    }
+
     func previous() {
         if let remoteControl { remoteControl(.previous); return }
         guard let index = currentIndex else { return }
+        // Going back drops a skip still waiting for more songs.
+        dropWaitingSkip()
         let chained = afterFadeOut != nil
         if !chained, currentTime > 3 || index == 0 {
             seek(to: 0)
@@ -962,6 +1018,7 @@ final class PlayerController {
     }
 
     func jump(to entry: QueueEntry) {
+        dropWaitingSkip()
         skipWithFade { [weak self] in
             guard let self, let index = self.queue.firstIndex(of: entry) else { return }
             self.currentIndex = index
@@ -975,14 +1032,15 @@ final class PlayerController {
     }
 
     private func performSeek(to seconds: TimeInterval) {
+        finishPendingSkip()
         currentTime = seconds
         if CastController.shared.isActive {
             CastController.shared.seek(to: seconds)
             nowPlaying.updatePlayback()
             return
         }
-        if player.currentItem == nil {
-            // Nothing loaded yet (restored session): apply it when the song loads.
+        if player.currentItem == nil || loadingEntry != nil {
+            // Nothing loaded yet (restored session) or still loading: apply it when the song is ready.
             pendingSeek = seconds > 0 ? seconds : nil
             nowPlaying.updatePlayback()
             return
@@ -1183,7 +1241,7 @@ final class PlayerController {
     func clearUpcoming() {
         guard let index = currentIndex else { return }
         generation += 1
-        advanceWhenExtended = false
+        dropWaitingSkip()
         queue = Array(queue[...index])
         radioContinuation = nil
         resyncUpcoming()
@@ -1215,12 +1273,18 @@ final class PlayerController {
 
     /// Stays in step with the host: same play/pause, re-seeked when more than two seconds apart.
     func followSync(position: TimeInterval, playing: Bool) {
-        if player.currentItem == nil {
-            // Not loaded yet (paused, or a restored session): show the host's position now and
-            // start from it on play.
+        if loadingEntry != nil || player.currentItem == nil {
+            // Not loaded yet (loading, paused, or a restored session): show the host's position
+            // now and start from it on play.
             pendingSeek = position > 1 ? position : nil
             currentTime = position
-            if playing, !isBuffering { startCurrent(keepingPendingSeek: true) }
+            if loadingEntry != nil {
+                if !playing { player.pause() }
+                loadStartsPaused = !playing
+                showPlayerState()
+            } else if playing {
+                startCurrent(keepingPendingSeek: true)
+            }
             return
         }
         if abs(playbackPosition - position) > 2 { performSeek(to: position) }
@@ -1285,6 +1349,8 @@ final class PlayerController {
     /// once); nil when not switching.
     private(set) var versionTarget: Bool?
     @ObservationIgnored private var versionTask: Task<Void, Never>?
+    /// The queue entry the switch in progress is for.
+    @ObservationIgnored private var versionEntry: UUID?
 
     /// YouTube Music's Song/Video switch: the music video version of the current song from the
     /// same point (or back to the song). The current version keeps playing while the other loads,
@@ -1300,14 +1366,26 @@ final class PlayerController {
         if automatic, CastController.shared.isActive { return }
         versionTask?.cancel()
         versionTarget = toVideo
+        versionEntry = entry.id
         let started = Date()
         func ms() -> Int { Int(Date().timeIntervalSince(started) * 1000) }
         videoLog.notice("switch to \(toVideo ? "video" : "song", privacy: .public) from \(entry.track.videoId, privacy: .public)")
         versionTask = Task {
+            // Done, given up, or the song changed meanwhile: the switch stops showing it's on its way.
+            // (A newer switch, which cancelled this one, shows its own.)
+            defer {
+                if !Task.isCancelled {
+                    versionTarget = nil
+                    versionEntry = nil
+                }
+            }
+            /// Still the song playing, in the version it had when the switch was asked for.
+            @MainActor func stillCurrent() -> Bool {
+                !Task.isCancelled && currentIndex == index && queue.indices.contains(index) && queue[index].id == entry.id
+                    && queue[index].track.videoId == entry.track.videoId
+            }
             guard let target = await Self.otherVersion(of: entry, video: toVideo) else {
-                guard !Task.isCancelled else { return }
-                versionTarget = nil
-                guard !automatic else { return }
+                guard !Task.isCancelled, !automatic else { return }
                 if toVideo {
                     VideoController.shared.videoMode = false
                     Router.shared.showToast(String(localized: "No music video found for this song"), icon: "video.slash")
@@ -1316,7 +1394,7 @@ final class PlayerController {
                 }
                 return
             }
-            guard !Task.isCancelled, currentIndex == index, queue.indices.contains(index), queue[index].id == entry.id else { return }
+            guard stillCurrent() else { return }
             videoLog.notice("switch: other version \(target.videoId, privacy: .public) found at \(ms()) ms")
             let replacement = Self.entry(entry, as: target, video: toVideo)
             let cast = CastController.shared
@@ -1324,25 +1402,43 @@ final class PlayerController {
                 queue[index] = replacement
                 cast.load(replacement.track, at: cast.position, autoplay: cast.remotePlaying)
                 if !toVideo { VideoController.shared.videoMode = false }
-                versionTarget = nil
                 nowPlaying.updateTrack()
+                return
+            }
+            // Its sound hasn't started yet (just skipped to): load the other version instead, from
+            // where it was going to start, playing or paused as asked meanwhile.
+            if loadingEntry == entry.id {
+                restartLoad(as: replacement, at: index)
+                if !toVideo { VideoController.shared.videoMode = false }
                 return
             }
             // The picture starts loading alongside the sound.
             if toVideo { VideoController.shared.prepare(videoId: target.videoId) }
             do {
                 let item = try await makeItem(for: replacement)
-                guard !Task.isCancelled, currentIndex == index, queue.indices.contains(index), queue[index].id == entry.id else { return }
+                guard stillCurrent() else { forget(item); return }
                 videoLog.notice("switch: its sound ready at \(ms()) ms")
-                await swapVersion(to: replacement, item: item, at: index)
-                videoLog.notice("switch: swapped at \(ms()) ms")
+                if loadingEntry == entry.id {
+                    // Reloading meanwhile (a stall): the other version loads in its place.
+                    forget(item)
+                    restartLoad(as: replacement, at: index)
+                } else {
+                    await swapVersion(to: replacement, item: item, at: index)
+                    videoLog.notice("switch: swapped at \(ms()) ms")
+                }
                 if !toVideo { VideoController.shared.videoMode = false }
             } catch {
                 guard !Task.isCancelled else { return }
                 Router.shared.showToast(String(localized: "Couldn't switch versions"), icon: "exclamationmark.triangle.fill")
             }
-            if !Task.isCancelled { versionTarget = nil }
         }
+    }
+
+    /// The playing entry, still loading, becomes `replacement` (its other version) and loads afresh.
+    private func restartLoad(as replacement: QueueEntry, at index: Int) {
+        queue[index] = replacement
+        startPausedOnce = loadStartsPaused
+        startCurrent(keepingPendingSeek: true)
     }
 
     /// The song's music video, or the video's song: one already known for this entry, or looked up.
@@ -1399,6 +1495,7 @@ final class PlayerController {
         versionTask?.cancel()
         versionTask = nil
         versionTarget = nil
+        versionEntry = nil
     }
 
     /// Puts the other version in place of the playing one, from where the music is now.
@@ -1416,8 +1513,10 @@ final class PlayerController {
             await deck.seek(to: CMTime(seconds: position + (playing ? 0.15 : 0), preferredTimescale: 600),
                             toleranceBefore: .zero, toleranceAfter: .zero)
         }
-        guard queue.indices.contains(index), currentIndex == index, player === old else {
+        // Skipped, crossfaded or reloading meanwhile: this deck is no longer the one to hand over to.
+        guard queue.indices.contains(index), currentIndex == index, player === old, loadingEntry == nil else {
             deck.removeAllItems()
+            forget(item)
             return
         }
         queue[index] = replacement
@@ -1478,6 +1577,7 @@ final class PlayerController {
         let playing = isPlaying || isBuffering
         if fadingDeck != nil { finishCrossfade() }
         loadTask?.cancel()
+        loadingEntry = nil
         enqueueTask?.cancel()
         // A song/video switch started here would swap in a player on this Mac.
         cancelVersionSwitch()
@@ -1575,9 +1675,18 @@ final class PlayerController {
         player.removeAllItems()
         itemEntries.removeAll()
         errorMessage = nil
+        loadingEntry = nil
+        // Whatever was waiting for the connection is superseded by this.
+        networkWait = nil
+        // Paused by whoever asked for this start (back from a paused Cast device, offline while
+        // paused); a song you pick or skip to plays.
+        let startsPaused = startPausedOnce
+        startPausedOnce = false
 
         guard let index = currentIndex, queue.indices.contains(index) else { return }
         let entry = queue[index]
+        // A Song/Video switch for the song before has nothing left to switch.
+        if let versionEntry, versionEntry != entry.id { cancelVersionSwitch() }
         // Skipping through songs quickly: only the one you stop on loads, and the downloads of
         // those passed by stop. Otherwise each would go on resolving and downloading, and the
         // song you land on would wait behind them all.
@@ -1591,15 +1700,12 @@ final class PlayerController {
             pendingSeek = resume
             currentTime = resume
         }
-        isBuffering = true
-        nowPlaying.updateTrack()
-        // A music video's picture loads alongside its sound, not after it.
-        VideoController.shared.trackChanged()
-
         // Casting: the device plays it (from this Mac's media server); nothing loads here.
         if CastController.shared.isActive {
-            let position = pendingSeek ?? 0, autoplay = !startPausedOnce
-            startPausedOnce = false
+            isBuffering = true
+            nowPlaying.updateTrack()
+            VideoController.shared.trackChanged()
+            let position = pendingSeek ?? 0, autoplay = !startsPaused
             pendingSeek = nil
             if Self.needsOtherVersion(entry) {
                 // In the mode you're in (its music video in Video mode), found before the device
@@ -1622,30 +1728,56 @@ final class PlayerController {
             return
         }
 
+        // What's shown from now until it's ready: whether it will start (play/pause meanwhile
+        // only changes that), not the empty player's own state.
+        loadingEntry = entry.id
+        loadStartsPaused = startsPaused
+        // Left playing, the player would start the new song by itself before it's ready.
+        if startsPaused { player.pause() }
+        isPlaying = !startsPaused
+        isBuffering = !startsPaused
+        nowPlaying.updateTrack()
+        // A music video's picture loads alongside its sound, not after it.
+        VideoController.shared.trackChanged()
+
         loadTask = Task {
+            var made: AVPlayerItem?
+            /// Still the song to play: not skipped past, cancelled, or switched to its other version.
+            @MainActor func stillWanted() -> Bool {
+                !Task.isCancelled && loadingEntry == entry.id && current?.videoId == entry.track.videoId
+            }
             do {
                 // Another skip within this moment cancels it before anything is fetched.
                 if burst { try await Task.sleep(for: .milliseconds(350)) }
                 let item = try await makeItem(for: entry)
-                guard !Task.isCancelled, current?.videoId == entry.track.videoId else { return }
+                made = item
+                guard stillWanted() else { forget(item); return }
                 player.insert(item, after: nil)
                 // Play only once it's ready: a long recording (HLS) told to play before then is
                 // quietly reset to paused and would never start.
                 await Self.untilDecided(item, timeout: 10)
-                guard !Task.isCancelled, current?.videoId == entry.track.videoId else { return }
+                guard stillWanted() else { return }
                 if item.status == .failed { throw item.error ?? InnerTubeError.noAudio }
-                if let pendingSeek {
-                    // Exact: a streamed recording would otherwise resume at the start of its
-                    // fragment, up to ten seconds back.
-                    await player.seek(to: CMTime(seconds: pendingSeek, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
-                    self.pendingSeek = nil
+                // Exact: a streamed recording would otherwise resume at the start of its
+                // fragment, up to ten seconds back. Seeks made meanwhile land here too.
+                while let target = pendingSeek {
+                    pendingSeek = nil
+                    seeksInFlight += 1
+                    await player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+                    seeksInFlight -= 1
+                    guard stillWanted() else { return }
                 }
-                // Coming back from a Cast device that was paused: stay paused.
-                if startPausedOnce { startPausedOnce = false } else { player.play() }
+                loadingEntry = nil
+                if loadStartsPaused { player.pause() } else { player.play() }
+                // The player may already be in that state, and then reports no change.
+                showPlayerState()
                 trackDidChange()
             } catch is CancellationError {
+                if let made { forget(made) }
             } catch {
-                guard !Task.isCancelled else { return }
+                if let made { forget(made) }
+                guard stillWanted() else { return }
+                loadingEntry = nil
                 handleFailure(error)
             }
         }
@@ -1711,8 +1843,8 @@ final class PlayerController {
                 entry = Self.entry(entry, as: other, video: VideoController.shared.videoMode)
                 queue[at] = entry
             }
-            guard let item = try? await makeItem(for: entry), !Task.isCancelled else { return }
-            guard player.items().count == 1, let last = player.items().last else { return }
+            guard let item = try? await makeItem(for: entry) else { return }
+            guard !Task.isCancelled, player.items().count == 1, let last = player.items().last else { forget(item); return }
             player.insert(item, after: last)
             sources[entry.track.videoId]?.prefetch()
         }
@@ -1729,7 +1861,8 @@ final class PlayerController {
 
     private func currentItemChanged() {
         guard let item = player.currentItem else {
-            if repeatMode != .one, let index = currentIndex, index + 1 >= queue.count { isPlaying = false }
+            // The end of the queue (not the empty player of a song that's loading).
+            if loadingEntry == nil, repeatMode != .one, let index = currentIndex, index + 1 >= queue.count { isPlaying = false }
             return
         }
         guard let entryId = itemEntries[ObjectIdentifier(item)],
@@ -1810,9 +1943,15 @@ final class PlayerController {
         // the queue failing every song.
         guard consecutiveFailures < 5 else {
             errorMessage = Self.friendlyMessage(for: InnerTubeError.noAudio)
+            player.pause()
+            showPlayerState()
             return
         }
-        guard let index = currentIndex, index + 1 < queue.count else { return }
+        guard let index = currentIndex, index + 1 < queue.count else {
+            player.pause()
+            showPlayerState()
+            return
+        }
         let failedId = queue[index].id
         Task {
             try? await Task.sleep(for: .seconds(1.5))
@@ -1865,25 +2004,30 @@ final class PlayerController {
         startCurrent(keepingPendingSeek: true)
     }
 
-    @ObservationIgnored private var waitingForNetwork = false
+    /// Waiting for the connection to pick up the playing song again. Any other start (a skip,
+    /// play pressed meanwhile) clears it, so a late return doesn't restart over what's playing.
+    @ObservationIgnored private var networkWait: UUID?
     /// Retries while the Mac says it's online but YouTube can't be reached (backs off).
     @ObservationIgnored private var networkRetries = 0
 
     /// Offline: say so, and pick up from the same spot once the connection is back.
     private func waitForNetwork() {
         errorMessage = String(localized: "You're offline — playback continues when you're back online.")
-        guard !waitingForNetwork else { return }
-        waitingForNetwork = true
+        guard networkWait == nil, let index = currentIndex, queue.indices.contains(index) else { return }
+        let wait = UUID()
+        networkWait = wait
+        let entryId = queue[index].id
         let position = playbackPosition
         let wasPlaying = isPlaying
         player.pause()
+        showPlayerState()
         let delay = min(30, 3 * pow(2, Double(networkRetries)))
         networkRetries += 1
         Connectivity.shared.whenOnline(retryAfter: delay) { [weak self] in
-            guard let self, self.waitingForNetwork else { return }
-            self.waitingForNetwork = false
+            guard let self, self.networkWait == wait else { return }
+            self.networkWait = nil
             self.errorMessage = nil
-            guard self.current != nil else { return }
+            guard let index = self.currentIndex, self.queue.indices.contains(index), self.queue[index].id == entryId else { return }
             self.pendingSeek = position > 1 ? position : nil
             self.startPausedOnce = !wasPlaying
             self.startCurrent(keepingPendingSeek: true)
@@ -2065,7 +2209,10 @@ final class PlayerController {
         }
         // Not over AirPlay: the route belongs to this player, and a crossfade hands the music to a
         // second one (which would play on the Mac). Songs change gaplessly there instead.
-        if crossfadeSeconds > 0, isPlaying, fadingDeck == nil, repeatMode != .one, !player.isExternalPlaybackActive,
+        // Not while a pause is fading out (the next song would play on) or a Song/Video switch is
+        // about to hand over to another player.
+        if crossfadeSeconds > 0, isPlaying, fadingDeck == nil, afterFadeOut == nil, versionTarget == nil, repeatMode != .one,
+           !player.isExternalPlaybackActive,
            duration > crossfadeSeconds * 3, currentTime >= duration - crossfadeSeconds, player.items().count > 1 {
             startCrossfade()
         }
@@ -2116,6 +2263,57 @@ final class PlayerController {
         player.volume = Float(userLevel * gain * fadeLevel * sleepFadeLevel * transportLevel)
     }
 }
+
+#if DEBUG
+extension PlayerController {
+    /// What the playback stress test (scripts/playback-stress.py, via `ytmusicfast debug-state`)
+    /// checks after each step. Debug builds only.
+    var debugState: [String: Any] {
+        let index = currentIndex ?? -1
+        let entry = queue.indices.contains(index) ? queue[index] : nil
+        let itemEntry = player.currentItem.flatMap { itemEntries[ObjectIdentifier($0)] }
+        let timeControl = switch player.timeControlStatus {
+        case .paused: "paused"
+        case .playing: "playing"
+        default: "waiting"
+        }
+        return [
+            "index": index,
+            "queueCount": queue.count,
+            "videoId": entry?.track.videoId ?? "",
+            "songVideoId": currentSong?.videoId ?? "",
+            "title": entry?.track.title ?? "",
+            "isVideo": entry?.track.isVideo ?? false,
+            "nextVideoId": upNext.first?.track.videoId ?? "",
+            "playing": isPlaying,
+            "buffering": isBuffering,
+            "loading": loadingEntry != nil,
+            "loadStartsPaused": loadStartsPaused,
+            "timeControl": timeControl,
+            "rate": player.rate,
+            "position": playbackPosition,
+            "shownPosition": currentTime,
+            "duration": duration,
+            "hasItem": player.currentItem != nil,
+            "itemMatchesEntry": entry != nil && itemEntry == entry?.id,
+            "deckItems": player.items().count,
+            "crossfading": fadingDeck != nil,
+            "crossfade": crossfadeSeconds,
+            "repeat": repeatMode.rawValue,
+            "videoMode": VideoController.shared.videoMode,
+            "versionTarget": versionTarget.map { $0 ? "video" : "song" } ?? "",
+            "offlineMode": offlineMode,
+            "autoplay": autoplay,
+            "advanceWhenExtended": advanceWhenExtended,
+            "extending": extendingFor == generation,
+            "waitingForNetwork": networkWait != nil,
+            "error": errorMessage ?? "",
+            "outputDevice": outputDeviceUID ?? "",
+            "volume": volume,
+        ]
+    }
+}
+#endif
 
 /// Whether this Mac is online, from the system's own network path updates (no polling).
 @MainActor

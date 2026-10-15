@@ -130,6 +130,21 @@ enum CommandServer {
             }
             return ok(await ChainedStreamResolver.shared.diagnose(videoId: id))
         #if DEBUG
+        // For scripts/playback-stress.py: the player's inner state, and settings the CLI doesn't
+        // otherwise change. Debug builds only.
+        case "debug-state":
+            let data = (try? JSONSerialization.data(withJSONObject: player.debugState, options: [.sortedKeys])) ?? Data()
+            return ok(String(decoding: data, as: UTF8.self))
+        case "debug-set":
+            guard rest.count == 2 else { return fail("debug-set crossfade <seconds> | video on|off | offline on|off | autoplay on|off") }
+            let on = rest[1] == "on"
+            switch rest[0] {
+            case "crossfade": player.crossfadeSeconds = Double(rest[1]) ?? 0
+            case "video": SongVideoToggle.select(video: on)
+            case "offline": player.offlineMode = on
+            case "autoplay": player.autoplay = on
+            default: return fail("Unknown setting: \(rest[0])")
+            }
         case "debug-cast":
             // Casting from scripts: `debug-cast <device name>`, `debug-cast off`, `debug-cast status`.
             let cast = CastController.shared
