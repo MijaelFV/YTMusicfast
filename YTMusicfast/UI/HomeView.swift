@@ -87,6 +87,7 @@ struct HomeView: View {
                     .padding(.top, -20)
                     .animation(.easeInOut(duration: 0.6), value: tint)
             }
+            .restoresScrollPosition()
             }
         }
         .reportsScrolling()
@@ -139,7 +140,7 @@ struct HomeView: View {
             }
             .appearTransition()
         } else if let error = model.error {
-            ErrorView(message: error) { Task { await model.load() } }
+            ErrorView(error: error) { Task { await model.load() } }
         } else {
             SkeletonHome().padding(.horizontal, Theme.pagePadding)
         }
@@ -165,7 +166,7 @@ struct FeedView: View {
                 .padding(.horizontal, Theme.pagePadding - 12)
                 .appearTransition()
             } else if let error = model.error {
-                ErrorView(message: error) { Task { await model.load() } }
+                ErrorView(error: error) { Task { await model.load() } }
             } else {
                 SkeletonHome().padding(.horizontal, Theme.pagePadding)
             }
@@ -213,7 +214,7 @@ struct OfflineHome: View {
 struct ChartsFeed: View {
     @AppStorage("chartsCountry") private var country = ""
     @State private var page: BrowsePage?
-    @State private var error: String?
+    @State private var error: (any Error)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -243,7 +244,7 @@ struct ChartsFeed: View {
                 .padding(.horizontal, Theme.pagePadding - 12)
                 .appearTransition()
             } else if let error {
-                ErrorView(message: error) { Task { await load() } }
+                ErrorView(error: error) { Task { await load() } }
             } else {
                 SkeletonHome().padding(.horizontal, Theme.pagePadding)
             }
@@ -256,7 +257,7 @@ struct ChartsFeed: View {
         do {
             page = try await MusicAPI.charts(country: country.isEmpty ? nil : country)
         } catch {
-            if page == nil { self.error = error.localizedDescription }
+            if page == nil { self.error = error }
         }
     }
 }

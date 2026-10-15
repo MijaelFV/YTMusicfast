@@ -364,7 +364,10 @@ enum MediaMenuEntries {
         let pinned = library.isPinned(item)
         entries += [
             .action(pinned ? String(localized: "Unpin from Your Library") : String(localized: "Pin to Your Library"),
-                    systemImage: pinned ? "pin.slash" : "pin") { library.togglePin(item) },
+                    systemImage: pinned ? "pin.slash" : "pin") {
+                library.togglePin(item)
+                if pinned { router.showToast(String(localized: "Unpinned \(item.title)"), icon: "pin.slash") { library.togglePin(item) } }
+            },
             .divider,
             .submenu(String(localized: "Share"), systemImage: "square.and.arrow.up", [
                 .action(String(localized: "Copy Link"), systemImage: "link") {
@@ -391,7 +394,9 @@ enum MediaMenuEntries {
             downloads.download(item, header: header, tracks: tracks)
             return
         }
+        Activity.shared.begin(.preparingDownload)
         Task {
+            defer { Activity.shared.end(.preparingDownload) }
             guard let loaded = try? await MusicAPI.collectionTracks(item.target), !loaded.tracks.isEmpty else {
                 Router.shared.showToast(String(localized: "Couldn't download \(item.title)"), icon: "exclamationmark.triangle.fill")
                 return
@@ -406,9 +411,14 @@ enum MediaMenuEntries {
             if let tracks, !tracks.isEmpty {
                 songs = tracks
             } else {
+                Activity.shared.begin(.queueing)
+                defer { Activity.shared.end(.queueing) }
                 songs = (try? await MusicAPI.collectionTracks(item.target, limit: 500))?.tracks ?? []
             }
-            guard !songs.isEmpty else { return }
+            guard !songs.isEmpty else {
+                Router.shared.showToast(String(localized: "Couldn't add \(item.title) to the queue"), icon: "exclamationmark.triangle.fill")
+                return
+            }
             if next { PlayerController.shared.playNext(songs) } else { PlayerController.shared.addToQueue(songs) }
             Router.shared.showToast(next ? String(localized: "Playing next") : String(localized: "Added to queue"))
         }
@@ -695,7 +705,16 @@ struct TrackList: View {
 
     /// ↑ / ↓ move the selection (⇧ extends it), Return plays from the first selected song.
     private func handleKey(_ key: SelectionKeys.Key, extend: Bool, proxy: ScrollViewProxy) -> Bool {
-        guard !selection.isEmpty, !tracks.isEmpty else { return false }
+        guard !tracks.isEmpty else { return false }
+        if selection.isEmpty {
+            // ↓ with nothing selected steps into the list at its first song.
+            guard key == .down, !extend else { return false }
+            selection = [0]
+            anchor = 0
+            cursor = 0
+            proxy.scrollTo(Self.rowID(0))
+            return true
+        }
         switch key {
         case .play:
             guard let first = selection.min(), tracks.indices.contains(first) else { return false }
@@ -811,12 +830,16 @@ struct TrackList: View {
             }
             .onAppear {
                 ListClipboard.register(clipboardOwner) { handleClipboard($0) }
+                // A page's main list takes the arrow keys from the start, so ↓ reaches it without a click.
+                if showHeader {
+                    SelectionKeys.register(clipboardOwner) { key, extend in handleKey(key, extend: extend, proxy: proxy) }
+                }
             }
             .onChange(of: selection) { _, selected in
                 // Arrow keys and Return (handled by the app, which knows when you're typing) act on
                 // the list you last selected in.
                 if !selected.isEmpty {
-                    SelectionKeys.handler = { key, extend in handleKey(key, extend: extend, proxy: proxy) }
+                    SelectionKeys.register(clipboardOwner) { key, extend in handleKey(key, extend: extend, proxy: proxy) }
                     ListClipboard.register(clipboardOwner) { handleClipboard($0) }
                 }
                 // The Delete key acts on this list too.
@@ -831,7 +854,7 @@ struct TrackList: View {
             }
             .onDisappear {
                 SelectionDelete.handler = nil
-                SelectionKeys.handler = nil
+                SelectionKeys.unregister(clipboardOwner)
                 ListClipboard.unregister(clipboardOwner)
             }
         }
@@ -843,7 +866,21 @@ struct TrackList: View {
 enum SelectionKeys {
     enum Key { case up, down, play }
     /// Returns whether the key was used; the Bool says ⇧ was held (extend the selection).
-    static var handler: ((Key, Bool) -> Bool)?
+    private(set) static var handler: ((Key, Bool) -> Bool)?
+    private static var owner: UUID?
+
+    static func register(_ id: UUID, _ handle: @escaping (Key, Bool) -> Bool) {
+        owner = id
+        handler = handle
+    }
+
+    /// Only the list that registered last can unregister: the next page's list may already have
+    /// taken over when the previous page goes away.
+    static func unregister(_ id: UUID) {
+        guard owner == id else { return }
+        owner = nil
+        handler = nil
+    }
 }
 
 /// What the Delete key removes: the selected songs of the list you last selected in.
@@ -892,9 +929,20 @@ enum ListClipboard {
 }
 
 /// Songs travel as their music.youtube.com links: dropping them in another app gives the link.
+@MainActor
 enum TrackDrag {
+    /// The songs of the last drag (or copy) started in the app: a drop that only needs their links
+    /// (a playlist) uses those, one that needs the songs themselves (the queue) finds them here.
+    private(set) static var lastTracks: [Track] = []
+
     static func payload(_ tracks: [Track]) -> String {
-        tracks.map { "https://music.youtube.com/watch?v=\($0.videoId)" }.joined(separator: "\n")
+        lastTracks = tracks
+        return tracks.map { "https://music.youtube.com/watch?v=\($0.videoId)" }.joined(separator: "\n")
+    }
+
+    /// The dragged songs behind these links, when the drag started in the app.
+    static func tracks(in payloads: [String]) -> [Track] {
+        videoIds(in: payloads).compactMap { id in lastTracks.first { $0.videoId == id } }
     }
 
     /// Video ids in `watch?v=` links (music.youtube.com, youtube.com) and `youtu.be/` links.
@@ -1747,18 +1795,60 @@ struct LoadingView: View {
     }
 }
 
+/// A page that couldn't load. Offline, it says so (the connection, not the app), points to what
+/// still plays, and tries again by itself as soon as macOS reports the connection is back.
 struct ErrorView: View {
-    var message: String
+    var error: any Error
     var retry: () -> Void
+    @Environment(Router.self) private var router
+    /// Cleared when the view goes away, so a reconnect doesn't reload a page you've left.
+    @State private var watch = Watch()
+
+    private final class Watch { var active = true }
+
+    private var offline: Bool {
+        PlayerController.isNetworkError(error) || !Connectivity.shared.isOnline
+    }
+
+    /// Plain words for what went wrong; the system's own text only as a detail.
+    private var message: String {
+        if case InnerTubeError.http(let code) = error {
+            return code >= 500 ? String(localized: "YouTube Music isn't answering right now. Try again in a moment.")
+                               : String(localized: "YouTube Music refused this page (error \(code)). Try again, or sign in again if it keeps happening.")
+        }
+        return String(localized: "Something went wrong loading this page.")
+    }
 
     var body: some View {
         ContentUnavailableView {
-            Label("Couldn't load", systemImage: "wifi.exclamationmark")
+            Label(offline ? String(localized: "You're offline") : String(localized: "Couldn't load this page"),
+                  systemImage: offline ? "wifi.slash" : "exclamationmark.triangle")
         } description: {
-            Text(message)
+            if offline {
+                Text("This page will load when you're back online. Downloads and songs you've played before still play.")
+            } else {
+                VStack(spacing: 6) {
+                    Text(message)
+                    Text(error.localizedDescription).font(.caption).foregroundStyle(Theme.tertiary).textSelection(.enabled)
+                }
+            }
         } actions: {
-            Button("Try Again", action: retry)
+            HStack(spacing: 10) {
+                Button("Try Again", action: retry)
+                if offline, !DownloadManager.shared.collections.isEmpty {
+                    Button("Show Downloads") {
+                        UserDefaults.standard.set(LibraryPanel.Filter.downloaded.rawValue, forKey: "libraryFilter")
+                        withAnimation(.spring(duration: 0.3)) { router.libraryCollapsed = false }
+                    }
+                }
+            }
         }
+        .onAppear {
+            guard offline else { return }
+            let watch = watch
+            Connectivity.shared.whenOnline(retryAfter: 5) { if watch.active { retry() } }
+        }
+        .onDisappear { watch.active = false }
     }
 }
 
@@ -1795,7 +1885,7 @@ struct ShelfPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text(shelf.title ?? "")
-                    .font(.system(size: 32, weight: .bold))
+                    .font(.pageTitle)
                     .padding(.horizontal, 12)
                 if shelf.style == .rows {
                     TrackList(tracks: tracks, showAlbum: true, numbered: false)
@@ -1809,6 +1899,7 @@ struct ShelfPage: View {
             .padding(.top, 28)
             .padding(.bottom, 32)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .restoresScrollPosition()
         }
     }
 }

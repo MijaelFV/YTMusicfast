@@ -77,6 +77,22 @@ extension Color {
     }
 }
 
+// MARK: - Type scale
+
+/// The app's text sizes, so the same kind of text reads the same everywhere.
+extension Font {
+    /// A page's own title when it has no header art ("Show all", Explore, Charts).
+    static let pageTitle = Font.system(size: 32, weight: .bold)
+    /// Sections and shelves on a page; sheet titles.
+    static let sectionTitle = Font.system(size: 22, weight: .bold)
+    /// Card and panel headings ("Credits", "Next in queue").
+    static let cardTitle = Font.system(size: 15, weight: .bold)
+    /// Song and item titles in rows.
+    static let rowTitle = Font.system(size: 15)
+    /// Subtitles, details and secondary links.
+    static let detail = Font.system(size: 13)
+}
+
 // MARK: - Panels & rows
 
 extension View {
@@ -383,7 +399,7 @@ struct SectionHeader: View {
                     Text(label).font(.system(size: 13)).foregroundStyle(Theme.secondary)
                 }
                 Text(title)
-                    .font(.system(size: 22, weight: .bold))
+                    .font(.sectionTitle)
                     .foregroundStyle(Theme.text)
             }
             Spacer()
@@ -480,6 +496,61 @@ extension View {
             ScrollActivity.shared.moved()
         }
     }
+}
+
+// MARK: - Scroll position on Back / Forward
+
+/// Goes inside a main page's vertical ScrollView, around its content. Leaving the page records how
+/// far it was scrolled; Back or Forward to it scrolls there again. It reads AppKit's scroll view
+/// once per navigation, so nothing runs while scrolling.
+struct ScrollRestorer: NSViewRepresentable {
+    func makeNSView(context: Context) -> RestorerView { RestorerView() }
+    func updateNSView(_ view: RestorerView, context: Context) {}
+
+    final class RestorerView: NSView {
+        private var started = false
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil, !started else { return }
+            started = true
+            let router = Router.shared
+            router.readScrollOffset = { [weak self] in self?.offset }
+            if let target = router.takeRestoreOffset(), target > 1 { restore(to: target, attempts: 40, lastSet: nil) }
+        }
+
+        /// Distance scrolled from the top.
+        var offset: CGFloat? {
+            guard let scrollView = enclosingScrollView, let document = scrollView.documentView else { return nil }
+            let visible = scrollView.contentView.bounds
+            return document.isFlipped ? visible.minY : document.bounds.height - visible.maxY
+        }
+
+        /// A page that's still loading (or lazily building rows) is too short at first: scroll as far
+        /// as it goes, a few times a second, until it reaches the spot or the reader scrolls themselves.
+        private func restore(to target: CGFloat, attempts: Int, lastSet: CGFloat?) {
+            guard let scrollView = enclosingScrollView, let document = scrollView.documentView, let current = offset else { return }
+            // The reader scrolled meanwhile: leave them where they are.
+            if let lastSet, abs(current - lastSet) > 2 { return }
+            let clip = scrollView.contentView
+            let furthest = max(0, document.bounds.height - clip.bounds.height)
+            let y = min(target, furthest)
+            let origin = document.isFlipped ? y : document.bounds.height - clip.bounds.height - y
+            clip.scroll(to: NSPoint(x: clip.bounds.minX, y: origin))
+            scrollView.reflectScrolledClipView(clip)
+            guard y < target - 1, attempts > 0 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.restore(to: target, attempts: attempts - 1, lastSet: y)
+            }
+        }
+    }
+}
+
+extension View {
+    /// On a main page's scrolling content: see `ScrollRestorer`.
+    func restoresScrollPosition() -> some View { background(ScrollRestorer()) }
 }
 
 // MARK: - Appearance

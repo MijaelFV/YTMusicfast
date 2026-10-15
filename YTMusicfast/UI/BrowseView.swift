@@ -24,7 +24,7 @@ final class PageModel {
         shelfTracks = byShelf
         mainTracks = mainShelfID.flatMap { byShelf[$0] } ?? []
     }
-    private(set) var error: String?
+    private(set) var error: (any Error)?
     private var loadingMore = false
 
     /// Recently opened pages, so going back or reopening one shows it at once instead of a skeleton.
@@ -135,7 +135,7 @@ final class PageModel {
             if page == nil, case .target(let target) = source, let offline = DownloadManager.shared.page(for: target) {
                 page = offline
             } else if page == nil {
-                self.error = error.localizedDescription
+                self.error = error
             }
         }
     }
@@ -341,6 +341,8 @@ struct BrowseView: View {
 
     private var scrollingPage: some View {
         ScrollView {
+            // One container for every state, so the scroll restorer outlives the skeleton.
+            VStack(spacing: 0) {
             if let page = model.page {
                 PausesHoverWhileScrolling {
                 VStack(alignment: .leading, spacing: 0) {
@@ -367,13 +369,15 @@ struct BrowseView: View {
                 }
                 .appearTransition()
             } else if let error = model.error {
-                ErrorView(message: error) { Task { await model.load() } }
+                ErrorView(error: error) { Task { await model.load() } }
                     .padding(.top, 80)
             } else if isCollection {
                 SkeletonCollection()
             } else {
                 SkeletonRows(count: 12).padding(28)
             }
+            }
+            .restoresScrollPosition()
         }
         .scrollIndicators(.automatic)
         .reportsScrolling()
@@ -621,7 +625,7 @@ struct BrowseView: View {
             EpisodeHeader(header: header, videoId: String(target.browseId.dropFirst(4)), tint: tint)
         } else {
             Text(page.header?.title ?? target.title)
-                .font(.system(size: 32, weight: .bold))
+                .font(.pageTitle)
                 .padding(.horizontal, Theme.pagePadding)
                 .padding(.top, 28)
                 .padding(.bottom, 20)
@@ -654,10 +658,10 @@ struct BrowseView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         if target.kind == .artist {
                             Text(index == 0 ? String(localized: "Popular") : (shelf.title ?? String(localized: "Songs")))
-                                .font(.system(size: 22, weight: .bold))
+                                .font(.sectionTitle)
                                 .padding(.horizontal, 12)
                         } else if let title = shelf.title, !isCollection {
-                            Text(title).font(.system(size: 22, weight: .bold)).padding(.horizontal, 12)
+                            Text(title).font(.sectionTitle).padding(.horizontal, 12)
                         }
                         let shown = isMain && isCollection && (trackSort != .custom || !trackQuery.isEmpty) ? arrange(tracks) : tracks
                         // An artist's Popular: five songs, ten with "See more".
@@ -1087,7 +1091,7 @@ struct StickyHeader: View {
                 player.playOrToggle(tracks, from: target)
             }
                 .disabled(tracks.isEmpty)
-            Text(title).font(.system(size: 22, weight: .bold)).lineLimit(1)
+            Text(title).font(.sectionTitle).lineLimit(1)
             Spacer()
         }
         .padding(.horizontal, Theme.pagePadding)

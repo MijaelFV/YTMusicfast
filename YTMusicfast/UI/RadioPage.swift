@@ -26,7 +26,7 @@ struct RadioPage: View {
     let seed: RadioSeed
     @State private var tracks: [Track] = []
     @State private var continuation: String?
-    @State private var error: String?
+    @State private var error: (any Error)?
     @State private var loading = false
     @State private var saving = false
     @State private var tint = Color(white: 0.3)
@@ -47,11 +47,12 @@ struct RadioPage: View {
                         .padding(.bottom, 32)
                         .appearTransition()
                 } else if let error {
-                    ErrorView(message: error) { Task { await load() } }.padding(.top, 40)
+                    ErrorView(error: error) { Task { await load() } }.padding(.top, 40)
                 } else {
                     SkeletonRows(count: 12).padding(.horizontal, 28)
                 }
             }
+            .restoresScrollPosition()
         }
         .reportsScrolling()
         .artworkTint(seed.thumbnail, into: $tint)
@@ -137,7 +138,7 @@ struct RadioPage: View {
             continuation = result.continuation
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            self.error = error
         }
     }
 

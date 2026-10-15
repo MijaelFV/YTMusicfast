@@ -155,6 +155,12 @@ struct SignInView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AuthManager.self) private var auth
     @State private var finishing = false
+    /// Google's page hasn't drawn yet (a blank sheet otherwise).
+    @State private var loading = true
+    /// Why Google's page couldn't load (offline, a captive portal…).
+    @State private var failure: String?
+    /// Bumped by Try Again: a fresh web view loads the form again.
+    @State private var attempt = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -173,12 +179,41 @@ struct SignInView: View {
             .padding(14)
             Divider()
             ZStack {
-                GoogleSignInWebView {
+                GoogleSignInWebView(onLoad: { loaded in
+                    switch loaded {
+                    case .success: loading = false
+                    case .failure(let error): failure = error.localizedDescription
+                    }
+                }) {
                     finishing = true
                     Task {
                         await auth.completeSignIn()
                         dismiss()
                     }
+                }
+                .id(attempt)
+                if let failure {
+                    ContentUnavailableView {
+                        Label("Couldn't reach Google", systemImage: "wifi.slash")
+                    } description: {
+                        Text(failure)
+                    } actions: {
+                        Button("Try Again") {
+                            self.failure = nil
+                            loading = true
+                            attempt += 1
+                        }
+                        .keyboardShortcut(.defaultAction)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.background)
+                } else if loading, !finishing {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Opening Google sign-in…").foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.background)
                 }
                 if finishing {
                     VStack(spacing: 12) {
@@ -197,12 +232,14 @@ struct SignInView: View {
 /// Shows Google's login form and finishes as soon as YouTube's session cookie appears.
 /// The YouTube Music website itself is never shown: navigation there is intercepted.
 struct GoogleSignInWebView: NSViewRepresentable {
+    /// The first page drew, or a page couldn't load.
+    var onLoad: (Result<Void, Error>) -> Void = { _ in }
     var onSignedIn: () -> Void
 
     /// Google's login form, continuing to YouTube's sign-in handshake (which sets the youtube.com cookies).
     static let loginURL = URL(string: "https://accounts.google.com/ServiceLogin?service=youtube&uilel=3&hl=en&continue=https%3A%2F%2Fwww.youtube.com%2Fsignin%3Faction_handle_signin%3Dtrue%26app%3Ddesktop%26next%3Dhttps%253A%252F%252Fmusic.youtube.com%252F")!
 
-    func makeCoordinator() -> Coordinator { Coordinator(onSignedIn: onSignedIn) }
+    func makeCoordinator() -> Coordinator { Coordinator(onSignedIn: onSignedIn, onLoad: onLoad) }
 
     /// Passkeys only work in an app's web view with an entitlement Apple grants to browsers, so
     /// here WebAuthn exists but always fails, and Google would offer a passkey prompt that can't
@@ -240,10 +277,34 @@ struct GoogleSignInWebView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKHTTPCookieStoreObserver {
         let onSignedIn: () -> Void
+        let onLoad: (Result<Void, Error>) -> Void
         private var done = false
         private weak var webView: WKWebView?
 
-        init(onSignedIn: @escaping () -> Void) { self.onSignedIn = onSignedIn }
+        init(onSignedIn: @escaping () -> Void, onLoad: @escaping (Result<Void, Error>) -> Void) {
+            self.onSignedIn = onSignedIn
+            self.onLoad = onLoad
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            onLoad(.success(()))
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            report(error)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            report(error)
+        }
+
+        /// Our own cancels (the YouTube Music site is never shown) aren't failures.
+        private func report(_ error: Error) {
+            let error = error as NSError
+            guard !done, !(error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled),
+                  !(error.domain == "WebKitErrorDomain" && error.code == 102) else { return }
+            onLoad(.failure(error))
+        }
 
         func attach(to webView: WKWebView) {
             self.webView = webView

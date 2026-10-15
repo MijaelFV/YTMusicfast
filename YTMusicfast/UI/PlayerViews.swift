@@ -541,7 +541,7 @@ struct AboutArtistCard: View {
                 ArtworkBanner(url: header?.thumbnail, width: 298, height: 200)
                 LinearGradient(colors: [.black.opacity(0.5), .clear], startPoint: .top, endPoint: .center)
                 Text("About the artist")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.cardTitle)
                     .padding(14)
             }
             .frame(height: 200)
@@ -594,7 +594,7 @@ struct CreditsCard: View {
         if !track.artists.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Credits").font(.system(size: 15, weight: .bold))
+                    Text("Credits").font(.cardTitle)
                     Spacer()
                     if !track.isLocal {
                         Button("Show all") { router.creditsTrack = track }
@@ -662,7 +662,7 @@ struct CommentsCard: View {
             Button(action: open) {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        Text(total ?? String(localized: "Comments")).font(.system(size: 15, weight: .bold))
+                        Text(total ?? String(localized: "Comments")).font(.cardTitle)
                         Spacer()
                         Text("Show all")
                             .font(.system(size: 13, weight: .bold))
@@ -726,7 +726,7 @@ struct NextInQueueCard: View {
         if let next = player.upNext.first {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("Next in queue").font(.system(size: 15, weight: .bold))
+                    Text("Next in queue").font(.cardTitle)
                     Spacer()
                     Button("Open queue") { withAnimation(.spring(duration: 0.3)) { router.rightPanel = .queue } }
                         .buttonStyle(.plain)
@@ -747,6 +747,17 @@ struct QueuePanel: View {
     var showsHeader = true
     @Environment(Router.self) private var router
     @State private var tab = 0
+    /// Songs are being dragged over the queue.
+    @State private var dropTargeted = false
+
+    /// Songs dropped on the queue go to its end (or play, when nothing is).
+    private func addDropped(_ payloads: [String]) -> Bool {
+        let tracks = TrackDrag.tracks(in: payloads)
+        guard !tracks.isEmpty else { return false }
+        PlayerController.shared.addToQueue(tracks)
+        router.showToast(tracks.count == 1 ? String(localized: "Added to queue") : String(localized: "Added \(tracks.count) songs to queue"))
+        return true
+    }
 
     var body: some View {
         @Bindable var player = PlayerController.shared
@@ -793,7 +804,7 @@ struct QueuePanel: View {
                             QueueRow(entry: entry)
                         }
                     } header: {
-                        Text("Played").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.secondary)
+                        Text("Played").font(.cardTitle).foregroundStyle(Theme.secondary)
                     }
                 }
                 if let index = player.currentIndex, player.queue.indices.contains(index) {
@@ -801,7 +812,7 @@ struct QueuePanel: View {
                         QueueRow(entry: player.queue[index], isCurrent: true)
                             .id(Self.currentRowID)
                     } header: {
-                        Text("Now playing").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.text)
+                        Text("Now playing").font(.cardTitle).foregroundStyle(Theme.text)
                     }
                 }
                 Section {
@@ -813,7 +824,7 @@ struct QueuePanel: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text(player.playingContext.map { String(localized: "Next from: \($0.title)") } ?? String(localized: "Next up"))
-                                .font(.system(size: 15, weight: .bold))
+                                .font(.cardTitle)
                                 .foregroundStyle(Theme.text)
                                 .lineLimit(1)
                             Spacer()
@@ -844,6 +855,17 @@ struct QueuePanel: View {
             .onAppear { proxy.scrollTo(Self.currentRowID, anchor: .top) }
             .onChange(of: player.currentIndex) { proxy.scrollTo(Self.currentRowID, anchor: .top) }
             }
+            // Drag songs here from any list to queue them. (The list's own reordering is a
+            // different kind of drag, so it still works.)
+            .overlay {
+                if dropTargeted {
+                    RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                        .strokeBorder(Theme.accent, lineWidth: 2)
+                        .padding(4)
+                        .allowsHitTesting(false)
+                }
+            }
+            .dropDestination(for: String.self) { items, _ in addDropped(items) } isTargeted: { dropTargeted = $0 }
             }
         }
     }
@@ -910,7 +932,7 @@ struct RelatedList: View {
                         ForEach(page.shelves) { shelf in
                             VStack(alignment: .leading, spacing: 4) {
                                 if let title = shelf.title {
-                                    Text(title).font(.system(size: 15, weight: .bold)).padding(.horizontal, 16)
+                                    Text(title).font(.cardTitle).padding(.horizontal, 16)
                                 }
                                 ForEach(ContentFilter.shared.filter(shelf.items).prefix(8)) { item in
                                     switch item {
@@ -1343,7 +1365,7 @@ struct PlayerStage: View {
             VStack(spacing: 0) {
                 HStack(spacing: 4) {
                     Text(player.playingContext?.title ?? player.current?.album?.name ?? String(localized: "Now playing"))
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.cardTitle)
                         .lineLimit(1)
                     Spacer()
                     if let track = player.current {

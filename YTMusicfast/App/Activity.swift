@@ -11,12 +11,17 @@ final class Activity {
 
     enum Kind: CaseIterable {
         case library, page, updates
+        /// A collection's songs loading before it plays, queues or downloads.
+        case starting, queueing, preparingDownload
 
         var label: String {
             switch self {
             case .library: String(localized: "Updating Your Library")
             case .page: String(localized: "Refreshing this page")
             case .updates: String(localized: "Checking for updates")
+            case .starting: String(localized: "Starting playback")
+            case .queueing: String(localized: "Adding to the queue")
+            case .preparingDownload: String(localized: "Getting the songs to download")
             }
         }
     }

@@ -41,12 +41,14 @@ final class AccountLibrary {
         guard AuthManager.shared.isSignedIn, let id = Self.libraryId(target: item.target, header: header) else {
             let pinned = LocalLibrary.shared.isPinned(item)
             LocalLibrary.shared.togglePin(item)
-            Router.shared.showToast(pinned ? String(localized: "Removed from Your Library") : String(localized: "Added to Your Library"))
+            Router.shared.showToast(pinned ? String(localized: "Removed from Your Library") : String(localized: "Added to Your Library"),
+                                    undo: pinned ? { LocalLibrary.shared.togglePin(item) } : nil)
             return
         }
         let wasSaved = isSaved(item, header: header)
         saved[key(id)] = !wasSaved
-        Router.shared.showToast(wasSaved ? String(localized: "Removed from Your Library") : String(localized: "Saved to Your Library"))
+        Router.shared.showToast(wasSaved ? String(localized: "Removed from Your Library") : String(localized: "Saved to Your Library"),
+                                undo: wasSaved ? { [weak self] in self?.toggleSaved(item, header: header) } : nil)
         Task {
             do {
                 try await MusicAPI.setInLibrary(!wasSaved, playlistId: id)
@@ -74,7 +76,8 @@ final class AccountLibrary {
         }
         let was = isSubscribed(item, header: header)
         subscriptions[key(channel)] = !was
-        Router.shared.showToast(was ? String(localized: "Unsubscribed from \(item.title)") : String(localized: "Subscribed to \(item.title)"))
+        Router.shared.showToast(was ? String(localized: "Unsubscribed from \(item.title)") : String(localized: "Subscribed to \(item.title)"),
+                                undo: was ? { [weak self] in self?.toggleSubscribed(item, header: header) } : nil)
         Task {
             do {
                 try await MusicAPI.setSubscribed(!was, channelId: channel)

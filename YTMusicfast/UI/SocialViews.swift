@@ -40,7 +40,7 @@ struct ChaptersCard: View {
             if let chapters = store.extras[track.videoId]?.chapters, chapters.count > 1 {
                 let current = chapters.lastIndex { $0.start <= player.currentTime + 0.5 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Chapters").font(.system(size: 15, weight: .bold)).padding(.bottom, 4)
+                    Text("Chapters").font(.cardTitle).padding(.bottom, 4)
                     ForEach(Array(chapters.enumerated()), id: \.offset) { index, chapter in
                         Button { player.seek(to: chapter.start) } label: {
                             HStack(spacing: 10) {
@@ -136,7 +136,7 @@ struct CommentsList: View {
 
     private var header: some View {
         HStack {
-            Text(page.total ?? String(localized: "Comments")).font(.system(size: 15, weight: .bold))
+            Text(page.total ?? String(localized: "Comments")).font(.cardTitle)
             Spacer()
             if page.sorts.count > 1 {
                 MenuButton(alignment: .trailing) {
@@ -312,7 +312,7 @@ struct ListenTogetherSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Listen together").font(.system(size: 15, weight: .bold))
+            Text("Listen together").font(.cardTitle)
             switch together.role {
             case .off:
                 VStack(alignment: .leading, spacing: 12) {

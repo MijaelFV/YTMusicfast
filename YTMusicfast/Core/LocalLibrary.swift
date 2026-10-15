@@ -63,8 +63,19 @@ final class LocalLibrary {
         saveFolders()
     }
 
-    func delete(_ folder: Folder) {
+    /// Returns where it was, for Undo (`restore(_:at:)`).
+    @discardableResult
+    func delete(_ folder: Folder) -> Int? {
+        let index = folders.firstIndex { $0.id == folder.id }
         folders.removeAll { $0.id == folder.id }
+        saveFolders()
+        return index
+    }
+
+    /// Puts a deleted folder back where it was, with what was in it then.
+    func restore(_ folder: Folder, at index: Int?) {
+        guard !folders.contains(where: { $0.id == folder.id }) else { return }
+        folders.insert(folder, at: min(index ?? 0, folders.count))
         saveFolders()
     }
 
@@ -117,8 +128,18 @@ final class LocalLibrary {
         Self.save(recentCollections, "library.recentCollections")
     }
 
-    func removeRecent(_ item: MediaItem) {
+    /// Returns where it was, for Undo (`restoreRecent(_:at:)`).
+    @discardableResult
+    func removeRecent(_ item: MediaItem) -> Int? {
+        let index = recentCollections.firstIndex { $0.collectionId == item.collectionId }
         recentCollections.removeAll { $0.collectionId == item.collectionId }
+        Self.save(recentCollections, "library.recentCollections")
+        return index
+    }
+
+    func restoreRecent(_ item: MediaItem, at index: Int?) {
+        guard !recentCollections.contains(where: { $0.collectionId == item.collectionId }) else { return }
+        recentCollections.insert(item, at: min(index ?? 0, recentCollections.count))
         Self.save(recentCollections, "library.recentCollections")
     }
 

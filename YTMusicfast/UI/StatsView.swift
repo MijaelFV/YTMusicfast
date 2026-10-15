@@ -30,6 +30,7 @@ struct StatsView: View {
                 }
             }
             .padding(.bottom, 40)
+            .restoresScrollPosition()
         }
         .environment(\.playContext, Self.target)
     }

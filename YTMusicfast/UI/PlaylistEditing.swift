@@ -17,7 +17,7 @@ struct PlaylistFinder: View {
         VStack(alignment: .leading, spacing: 16) {
             Rectangle().fill(Theme.text.opacity(0.1)).frame(height: 1)
             HStack {
-                Text("Let's find something for your playlist").font(.system(size: 22, weight: .bold))
+                Text("Let's find something for your playlist").font(.sectionTitle)
                 Spacer()
                 if let onClose {
                     IconButton(systemImage: "xmark", size: 16, label: String(localized: "Close")) { onClose() }
@@ -76,7 +76,7 @@ struct RecommendedSongs: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Recommended").font(.system(size: 22, weight: .bold)).padding(.horizontal, 12)
+            Text("Recommended").font(.sectionTitle).padding(.horizontal, 12)
             Text("Based on what's in this playlist")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.secondary)
@@ -187,7 +187,7 @@ struct PlaylistDetailsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Edit details").font(.system(size: 22, weight: .bold))
+                Text("Edit details").font(.sectionTitle)
                 Spacer()
                 IconButton(systemImage: "xmark", size: 14, label: String(localized: "Close")) { dismiss() }
             }

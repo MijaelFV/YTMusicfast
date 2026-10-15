@@ -111,6 +111,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 tv.wake()
             }
         }
+        // Esc leaves the player page or lyrics, back to where you were.
+        if event.keyCode == 53, flags.subtracting([.numericPad, .function]).isEmpty, !typing,
+           window?.title == "YT Musicfast", window?.sheetParent == nil, window?.attachedSheet == nil,
+           [.nowPlaying, .lyrics].contains(Router.shared.route) {
+            let router = Router.shared
+            if router.canGoBack { router.goBack() } else { router.navigate(.home) }
+            return nil
+        }
         // ⌘K searches too (⌘F is the menu's shortcut; a second menu item would show "Search" twice).
         if event.keyCode == 40, flags == .command, window?.attachedSheet == nil, window?.sheetParent == nil {
             Router.shared.focusSearch()

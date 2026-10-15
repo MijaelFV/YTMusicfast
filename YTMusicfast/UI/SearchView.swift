@@ -93,7 +93,7 @@ struct SearchView: View {
     @State private var filter: SearchFilter?
     @State private var results: SearchResults?
     @State private var filters: [SearchFilter] = []
-    @State private var error: String?
+    @State private var error: (any Error)?
     @State private var loadingMore = false
     /// The query+filter the visible results belong to; when it differs, results are stale.
     @State private var resultsKey = ""
@@ -138,7 +138,7 @@ struct SearchView: View {
                         .background { shortcuts }
                     }
                     if let error, results == nil || resultsKey != currentKey {
-                        ErrorView(message: error) { Task { await run() } }
+                        ErrorView(error: error) { Task { await run() } }
                     } else if let results {
                         let stale = resultsKey != currentKey
                         resultsView(results)
@@ -152,6 +152,7 @@ struct SearchView: View {
                 }
             }
             .padding(.vertical, 20)
+            .restoresScrollPosition()
         }
         .task(id: currentKey) {
             guard !query.isEmpty else { results = nil; return }
@@ -195,7 +196,7 @@ struct SearchView: View {
         }
         if !recents.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Recent searches").font(.system(size: 22, weight: .bold)).padding(.horizontal, Theme.pagePadding)
+                Text("Recent searches").font(.sectionTitle).padding(.horizontal, Theme.pagePadding)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(recents, id: \.self) { recent in
@@ -406,7 +407,7 @@ struct SearchView: View {
                 // The connection dropped: what's on this Mac now, YouTube's results once it's back.
                 showOffline(key)
             } else {
-                self.error = error.localizedDescription
+                self.error = error
             }
         }
     }
@@ -443,7 +444,7 @@ struct BrowseAllView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            Text("Browse all").font(.system(size: 22, weight: .bold)).padding(.horizontal, Theme.pagePadding)
+            Text("Browse all").font(.sectionTitle).padding(.horizontal, Theme.pagePadding)
             if let page = model.page {
                 VStack(alignment: .leading, spacing: 28) {
                     ForEach(page.shelves) { ShelfView(shelf: $0) }

@@ -653,9 +653,23 @@ final class PlayerController {
         }
         latestRequest += 1
         let request = latestRequest
+        // The songs load first: the top bar's spinner shows the click was taken, and a failure says so.
+        Activity.shared.begin(.starting)
         Task {
-            guard let page = try? await MusicAPI.browse(target), request == latestRequest else { return }
+            defer { Activity.shared.end(.starting) }
+            let page: BrowsePage
+            do {
+                page = try await MusicAPI.browse(target)
+            } catch {
+                if request == latestRequest { Router.shared.showToast(String(localized: "Couldn't play \(target.title)"), icon: "exclamationmark.triangle.fill") }
+                return
+            }
+            guard request == latestRequest else { return }
             let tracks = target.kind == .artist ? (page.shelves.first { $0.style == .list }?.tracks ?? []) : page.mainTracks
+            guard !tracks.isEmpty else {
+                Router.shared.showToast(String(localized: "Nothing to play in \(target.title)"), icon: "music.note")
+                return
+            }
             startQueue(tracks, shuffled: shuffled, from: target)
         }
     }
@@ -663,7 +677,9 @@ final class PlayerController {
     func playPlaylist(id playlistId: String, params: String? = nil, shuffled: Bool? = nil, from context: BrowseTarget? = nil) {
         latestRequest += 1
         let request = latestRequest
+        Activity.shared.begin(.starting)
         Task {
+            defer { Activity.shared.end(.starting) }
             do {
                 let result = try await MusicAPI.radio(playlistId: playlistId, params: params)
                 guard request == latestRequest else { return }
@@ -673,7 +689,10 @@ final class PlayerController {
                 radioTuners = result.tuners
                 selectedTuner = result.selectedTuner
             } catch {
-                if request == latestRequest { errorMessage = Self.friendlyMessage(for: error) }
+                guard request == latestRequest else { return }
+                errorMessage = Self.friendlyMessage(for: error)
+                // With nothing playing, the player bar has nowhere to show it.
+                if current == nil { Router.shared.showToast(Self.friendlyMessage(for: error), icon: "exclamationmark.triangle.fill") }
             }
         }
     }

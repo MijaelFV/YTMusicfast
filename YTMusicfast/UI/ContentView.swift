@@ -823,7 +823,10 @@ struct LibraryPanel: View {
     private func row(_ entry: (item: MediaItem, pinned: Bool), indent: Bool = false) -> some View {
         LibraryRow(item: entry.item, pinned: entry.pinned, compact: compact, dense: viewMode == .compact,
                    selected: { if case .page(let open) = router.route { open.browseId == entry.item.target.browseId } else { false } }(),
-                   onRemoveFromRecents: local.recentCollections.contains { $0.collectionId == entry.item.collectionId } ? { local.removeRecent(entry.item) } : nil) {
+                   onRemoveFromRecents: local.recentCollections.contains { $0.collectionId == entry.item.collectionId } ? {
+                       let index = local.removeRecent(entry.item)
+                       router.showToast(String(localized: "Removed from Recents"), icon: "minus.circle") { local.restoreRecent(entry.item, at: index) }
+                   } : nil) {
             router.open(entry.item.target)
         }
         .padding(.leading, indent && !compact ? 16 : 0)
@@ -1032,7 +1035,7 @@ struct LibraryPanel: View {
 
     private var signInCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Your music, in one place").font(.system(size: 15, weight: .bold))
+            Text("Your music, in one place").font(.cardTitle)
             Text("Sign in to see your playlists, liked songs and mixes.")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.secondary)
@@ -1107,7 +1110,14 @@ struct LibraryFolderRow: View {
         .menuOnRightClick(hovering: hovering) {
             [
                 .action(String(localized: "Rename"), systemImage: "pencil") { router.renamingFolder = folder },
-                .action(String(localized: "Delete Folder"), systemImage: "trash") { LocalLibrary.shared.delete(folder) },
+                .action(String(localized: "Delete Folder"), systemImage: "trash") {
+                    // The folder as it is now (its playlists), so Undo puts back exactly this.
+                    let current = LocalLibrary.shared.folders.first { $0.id == folder.id } ?? folder
+                    let index = LocalLibrary.shared.delete(current)
+                    router.showToast(String(localized: "Deleted folder “\(current.name)”"), icon: "trash") {
+                        LocalLibrary.shared.restore(current, at: index)
+                    }
+                },
             ]
         }
         .help(compact ? folder.name : "")

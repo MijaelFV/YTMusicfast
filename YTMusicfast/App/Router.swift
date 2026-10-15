@@ -113,22 +113,52 @@ final class Router {
     func navigate(_ destination: Route) {
         showFullPlayer = false
         guard destination != route else { return }
+        rememberScroll()
         backStack.append(route)
         if backStack.count > 50 { backStack.removeFirst() }
         forwardStack.removeAll()
+        // A new visit starts at the top, even of a page that's also further back in history.
+        restoreOffset = nil
         route = destination
     }
 
     func goBack() {
         guard let previous = backStack.popLast() else { return }
+        rememberScroll()
         forwardStack.append(route)
+        restoreOffset = scrollOffsets[previous]
         route = previous
     }
 
     func goForward() {
         guard let next = forwardStack.popLast() else { return }
+        rememberScroll()
         backStack.append(route)
+        restoreOffset = scrollOffsets[next]
         route = next
+    }
+
+    // MARK: Scroll position (Back and Forward return to where you were)
+
+    /// How far each page in the history was scrolled when you left it.
+    @ObservationIgnored private var scrollOffsets: [Route: CGFloat] = [:]
+    /// Reads the main page's scroll offset; set by the page's `ScrollRestorer`.
+    @ObservationIgnored var readScrollOffset: (() -> CGFloat?)?
+    /// Where the page Back / Forward is opening should scroll to (taken once, by that page).
+    @ObservationIgnored private var restoreOffset: CGFloat?
+
+    func takeRestoreOffset() -> CGFloat? {
+        defer { restoreOffset = nil }
+        return restoreOffset
+    }
+
+    private func rememberScroll() {
+        scrollOffsets[route] = readScrollOffset?()
+        readScrollOffset = nil
+        // Only pages still reachable with Back / Forward.
+        if scrollOffsets.count > 60 {
+            scrollOffsets = scrollOffsets.filter { backStack.contains($0.key) || forwardStack.contains($0.key) || $0.key == route }
+        }
     }
 
     func open(_ target: BrowseTarget) {
@@ -253,10 +283,18 @@ enum Format {
         }
     }
 
+    /// "1 hr, 20 min" in the Mac's language.
     static func longDuration(_ seconds: TimeInterval) -> String {
-        let minutes = Int(seconds / 60)
-        return minutes >= 60 ? "\(minutes / 60) hr \(minutes % 60) min" : "\(minutes) min"
+        durationFormatter.string(from: (seconds / 60).rounded(.down) * 60) ?? ""
     }
+
+    private static let durationFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.hour, .minute]
+        formatter.unitsStyle = .short
+        formatter.zeroFormattingBehavior = .dropLeading
+        return formatter
+    }()
 
     static var greeting: String {
         switch Calendar.current.component(.hour, from: Date()) {

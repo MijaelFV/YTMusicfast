@@ -89,6 +89,7 @@ struct LocalFilesView: View {
                 }
             }
             .padding(.bottom, 32)
+            .restoresScrollPosition()
         }
         .environment(\.playContext, LocalFiles.target)
         .task { if !local.folders.isEmpty, local.tracks.isEmpty { await local.rescan() } }
@@ -133,7 +134,7 @@ struct CreditsSheet: View {
                     if let credits, !credits.isEmpty {
                         ForEach(credits, id: \.role) { credit in
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(credit.role).font(.system(size: 15, weight: .bold))
+                                Text(credit.role).font(.cardTitle)
                                 ForEach(credit.names, id: \.self) { name in
                                     Text(name).font(.system(size: 14)).foregroundStyle(Theme.secondary).textSelection(.enabled)
                                 }
@@ -197,7 +198,7 @@ struct ShortcutsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Keyboard shortcuts").font(.system(size: 22, weight: .bold))
+                Text("Keyboard shortcuts").font(.sectionTitle)
                 Spacer()
                 IconButton(systemImage: "xmark", size: 14, label: String(localized: "Close")) { dismiss() }
             }
@@ -206,7 +207,7 @@ struct ShortcutsSheet: View {
                           alignment: .leading, spacing: 24) {
                     ForEach(groups, id: \.0) { group in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(group.0).font(.system(size: 15, weight: .bold))
+                            Text(group.0).font(.cardTitle)
                             ForEach(group.1, id: \.0) { item in
                                 HStack {
                                     Text(item.0).font(.system(size: 13)).foregroundStyle(Theme.secondary)
