@@ -95,5 +95,5 @@ Run through this with the release build before publishing (about 30 minutes).
 ## Publish
 - [ ] Bump `MARKETING_VERSION` in project.yml; write `release-notes/<version>.md` (shown in the update prompt and
       on the GitHub release).
-- [ ] `PUBLISH=1 scripts/release.sh`
-- [ ] Commit the updated `Casks/ytmusicfast.rb` (version and checksum) and push.
+- [ ] `PUBLISH=1 scripts/release.sh` (also updates the cask in MijaelFV/homebrew-tap)
+- [ ] `brew upgrade --cask mijaelfv/tap/ytmusicfast` installs the new version.

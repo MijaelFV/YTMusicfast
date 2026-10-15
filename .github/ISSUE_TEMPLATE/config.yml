@@ -3,3 +3,6 @@ contact_links:
   - name: Security problem
     url: https://github.com/MijaelFV/YTMusicfast/security/advisories/new
     about: Please report security issues privately, not as a public issue.
+  - name: Question or idea
+    url: https://github.com/MijaelFV/YTMusicfast/discussions
+    about: Ask a question or share an idea in Discussions.

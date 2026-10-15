@@ -2,7 +2,8 @@
 # Builds a release: DMG plus the Sparkle update feed (appcast.xml) in dist/.
 #
 #   scripts/release.sh               # build dist/YTMusicfast-x.y.z.dmg and dist/appcast.xml
-#   PUBLISH=1 scripts/release.sh     # ...and create GitHub release vX.Y.Z with both attached
+#   PUBLISH=1 scripts/release.sh     # ...and create GitHub release vX.Y.Z with both attached, and
+#                                    # update the Homebrew cask in MijaelFV/homebrew-tap
 #
 # Bump MARKETING_VERSION in project.yml first. The app is ad-hoc signed (no Apple Developer
 # account): people click "Open Anyway" once on first install; Sparkle updates after that don't ask.
@@ -19,6 +20,7 @@ APP_NAME=YTMusicfast          # project, scheme and file names
 DISPLAY_NAME="YT Musicfast"   # what users see (the .app and the DMG volume)
 BUILD_DIR=build/release
 DIST_DIR=dist
+TAP_REPO=MijaelFV/homebrew-tap   # Homebrew tap: brew install --cask mijaelfv/tap/ytmusicfast
 APP="$BUILD_DIR/Build/Products/Release/$DISPLAY_NAME.app"
 DMG="$DIST_DIR/$APP_NAME-$VERSION.dmg"
 
@@ -67,9 +69,6 @@ rm -rf "$FEED_DIR"
 SHA=$(shasum -a 256 "$DMG" | cut -d' ' -f1)
 echo "$SHA  $DMG"
 
-echo "==> Updating the Homebrew cask (commit Casks/ytmusicfast.rb with the release)"
-sed -i '' -e "s/^  version \".*\"/  version \"$VERSION\"/" -e "s/^  sha256 .*/  sha256 \"$SHA\"/" Casks/ytmusicfast.rb
-
 echo "==> Done: $DMG and $DIST_DIR/appcast.xml"
 
 if [[ -n "${PUBLISH:-}" ]]; then
@@ -77,4 +76,11 @@ if [[ -n "${PUBLISH:-}" ]]; then
   NOTES="release-notes/$VERSION.md"
   gh release create "v$VERSION" "$DMG" "$DIST_DIR/appcast.xml" --title "YT Musicfast $VERSION" \
     $([[ -f "$NOTES" ]] && echo --notes-file "$NOTES" || echo --generate-notes)
+
+  echo "==> Updating the Homebrew cask in $TAP_REPO"
+  CASK_URL="repos/$TAP_REPO/contents/Casks/ytmusicfast.rb"
+  gh api "$CASK_URL" --jq .content | base64 -d \
+    | sed -e "s/^  version \".*\"/  version \"$VERSION\"/" -e "s/^  sha256 .*/  sha256 \"$SHA\"/" > "$DIST_DIR/ytmusicfast.rb"
+  gh api -X PUT "$CASK_URL" -f message="ytmusicfast $VERSION" -f content="$(base64 < "$DIST_DIR/ytmusicfast.rb")" \
+    -f sha="$(gh api "$CASK_URL" --jq .sha)" >/dev/null
 fi

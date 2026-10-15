@@ -55,9 +55,9 @@ To add a language, open the catalog in Xcode and add it, or export with
 ## Releasing (maintainers)
 
 Follow [the release checklist](docs/release-checklist.md): bump `MARKETING_VERSION` in `project.yml`, write
-`release-notes/<version>.md`, then `PUBLISH=1 scripts/release.sh` builds the DMG, signs the update feed and creates
-the GitHub release; commit the updated `Casks/ytmusicfast.rb`. Updates are signed with the Sparkle key in the
-maintainer's Keychain — keep a backup (see the script's header), or existing installs can't update.
+`release-notes/<version>.md`, then `PUBLISH=1 scripts/release.sh` builds the DMG, signs the update feed, creates
+the GitHub release and updates the cask in [MijaelFV/homebrew-tap](https://github.com/MijaelFV/homebrew-tap).
+Updates are signed with the Sparkle key in the maintainer's Keychain — keep a backup (see the script's header), or existing installs can't update.
 
 By contributing you agree your work is released under the [MIT License](LICENSE), and to follow the
 [Code of Conduct](CODE_OF_CONDUCT.md).
