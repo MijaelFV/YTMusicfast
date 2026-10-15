@@ -306,6 +306,12 @@ final class PlayerController {
     /// The exact playhead (`currentTime` is only published once a second), for syncing video.
     var playbackPosition: TimeInterval {
         if CastController.shared.isActive { return CastController.shared.position }
+        return localPosition
+    }
+
+    /// Where this Mac's own player is (also once casting has begun, when `playbackPosition`
+    /// already follows the device).
+    private var localPosition: TimeInterval {
         let time = player.currentTime().seconds
         return time.isFinite ? time : currentTime
     }
@@ -326,7 +332,8 @@ final class PlayerController {
             },
             deck.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] deck, _ in
                 Task { @MainActor in
-                    guard let self, deck === self.player else { return }
+                    // While casting, the device's state is what's shown, not this (silent) player's.
+                    guard let self, deck === self.player, !CastController.shared.isActive else { return }
                     self.isPlaying = deck.timeControlStatus != .paused
                     self.isBuffering = deck.timeControlStatus == .waitingToPlayAtSpecifiedRate
                     self.watchForStall()
@@ -772,6 +779,8 @@ final class PlayerController {
     func togglePlayPause() {
         if let remoteControl { remoteControl(.togglePlayPause); return }
         if current == nil { return }
+        // Paused while a skip waits for more songs: the next one starts paused too.
+        if advanceWhenExtended { startPausedOnce = isPlaying }
         if CastController.shared.isActive {
             let cast = CastController.shared
             if cast.remotePlaying { cast.pause() } else { cast.play() }
@@ -1228,6 +1237,8 @@ final class PlayerController {
         guard let index = currentIndex, queue.indices.contains(index) else { return }
         let entry = queue[index]
         guard entry.track.isVideo != toVideo, !entry.track.isLocal else { return }
+        // Casting: only a switch you ask for, and it goes to the device (nothing plays here).
+        if automatic, CastController.shared.isActive { return }
         versionTask?.cancel()
         versionTarget = toVideo
         let started = Date()
@@ -1248,9 +1259,18 @@ final class PlayerController {
             }
             guard !Task.isCancelled, currentIndex == index, queue.indices.contains(index), queue[index].id == entry.id else { return }
             videoLog.notice("switch: other version \(target.videoId, privacy: .public) found at \(ms()) ms")
+            let replacement = Self.entry(entry, as: target, video: toVideo)
+            let cast = CastController.shared
+            if cast.isActive {
+                queue[index] = replacement
+                cast.load(replacement.track, at: cast.position, autoplay: cast.remotePlaying)
+                if !toVideo { VideoController.shared.videoMode = false }
+                versionTarget = nil
+                nowPlaying.updateTrack()
+                return
+            }
             // The picture starts loading alongside the sound.
             if toVideo { VideoController.shared.prepare(videoId: target.videoId) }
-            let replacement = Self.entry(entry, as: target, video: toVideo)
             do {
                 let item = try await makeItem(for: replacement)
                 guard !Task.isCancelled, currentIndex == index, queue.indices.contains(index), queue[index].id == entry.id else { return }
@@ -1379,11 +1399,14 @@ final class PlayerController {
 
     /// Casting began: what's playing moves to the device, from where it is, and this Mac goes quiet.
     func castingStarted() {
-        let position = playbackPosition
+        // The device counts as connected already, so playbackPosition would be its 0.
+        let position = localPosition
         let playing = isPlaying || isBuffering
         if fadingDeck != nil { finishCrossfade() }
         loadTask?.cancel()
         enqueueTask?.cancel()
+        // A song/video switch started here would swap in a player on this Mac.
+        cancelVersionSwitch()
         player.pause()
         player.removeAllItems()
         itemEntries.removeAll()
@@ -1501,9 +1524,11 @@ final class PlayerController {
 
         // Casting: the device plays it (from this Mac's media server); nothing loads here.
         if CastController.shared.isActive {
-            CastController.shared.load(entry.track, at: pendingSeek ?? 0, autoplay: true)
+            CastController.shared.load(entry.track, at: pendingSeek ?? 0, autoplay: !startPausedOnce)
+            startPausedOnce = false
             pendingSeek = nil
             trackDidChange()
+            if let upcoming = upNext.first?.track { Task { await CastMediaServer.shared.prepare(upcoming) } }
             return
         }
 

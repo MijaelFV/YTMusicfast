@@ -63,6 +63,21 @@ final class CastController {
     @ObservationIgnored private var onReady: (() -> Void)?
     /// What to resume locally if casting stops.
     @ObservationIgnored private var lastKnownPosition: TimeInterval = 0
+    @ObservationIgnored private var loadGeneration = 0
+    /// Media sessions of songs skipped away from.
+    @ObservationIgnored private var staleSessionIds: Set<Int> = []
+    /// Play/pause asked for and not yet confirmed by the device, and whether it was sent.
+    @ObservationIgnored private var pendingPlaying: Bool?
+    @ObservationIgnored private var pendingPlayingSent = false
+    @ObservationIgnored private var pendingSince = Date()
+    /// A seek asked for before the device had the song.
+    @ObservationIgnored private var pendingSeek: TimeInterval?
+    /// A song was just loaded and the device hasn't started (or paused) it yet.
+    @ObservationIgnored private var settling = false
+    @ObservationIgnored private var settlingSince = Date()
+    /// The latest LOAD's request id: the device echoes it in the status that starts its session,
+    /// which tells that session from one of a load a quick skip replaced.
+    @ObservationIgnored private var loadRequestId: Int?
 
     private static let senderId = "sender-ytmusicfast"
     private static let mediaReceiver = "CC1AD845"
@@ -154,6 +169,9 @@ final class CastController {
         transportId = nil
         sessionId = nil
         mediaSessionId = nil
+        staleSessionIds = []
+        pendingPlaying = nil
+        pendingSeek = nil
         loadedVideoId = nil
         remotePlaying = false
         CastMediaServer.shared.stop()
@@ -167,7 +185,7 @@ final class CastController {
             send(Namespace.receiver, ["type": "LAUNCH", "appId": Self.mediaReceiver], to: "receiver-0")
             heartbeat?.invalidate()
             let timer = Timer(timeInterval: 5, repeats: true) { _ in
-                MainActor.assumeIsolated { CastController.shared.send(Namespace.heartbeat, ["type": "PING"], to: "receiver-0") }
+                MainActor.assumeIsolated { _ = CastController.shared.send(Namespace.heartbeat, ["type": "PING"], to: "receiver-0") }
             }
             RunLoop.main.add(timer, forMode: .common)
             heartbeat = timer
@@ -192,35 +210,65 @@ final class CastController {
     /// Loads a song on the receiver (the player calls this for every song while casting).
     func load(_ track: Track, at position: TimeInterval, autoplay: Bool) {
         let position = position.isFinite ? max(0, position) : 0
+        // A newer load (quick skips) makes this one stale: only the latest reaches the device.
+        loadGeneration += 1
+        let generation = loadGeneration
+        // Shown at once; the device's own reports take over once it has the song.
+        loadedVideoId = track.videoId
+        remoteTime = position
+        remoteTimeAt = Date()
+        remoteBuffering = true
+        remotePlaying = autoplay
+        pendingPlaying = nil
+        pendingSeek = nil
+        settling = true
+        settlingSince = Date()
+        loadRequestId = nil
+        // The old song's session goes on reporting for a moment: ignore it from now on.
+        if staleSessionIds.count > 20 { staleSessionIds = [] }
+        if let mediaSessionId { staleSessionIds.insert(mediaSessionId) }
+        mediaSessionId = nil
         let send = { [weak self] in
-            guard let self, let transportId = self.transportId else { return }
+            guard let self, self.transportId != nil else { return }
             Task {
                 guard let url = try? await CastMediaServer.shared.url(for: track) else {
                     self.fail(String(localized: "This Mac has no network address"))
                     return
                 }
-                self.loadedVideoId = track.videoId
-                self.remoteTime = position
-                self.remoteTimeAt = Date()
-                self.remoteBuffering = true
+                guard generation == self.loadGeneration, let transportId = self.transportId else { return }
                 var metadata: [String: Any] = ["metadataType": 3, "title": track.title, "artist": track.artistLine]
                 if let album = track.album?.name { metadata["albumName"] = album }
                 if let art = Artwork.url(track.thumbnail, size: 720) { metadata["images"] = [["url": art.absoluteString]] }
                 var media: [String: Any] = ["contentId": url.absoluteString, "contentType": "audio/mp4", "streamType": "BUFFERED", "metadata": metadata]
                 if let duration = track.duration, duration.isFinite, duration > 0 { media["duration"] = duration }
-                self.send(Namespace.media, ["type": "LOAD", "media": media, "autoplay": autoplay, "currentTime": position], to: transportId)
+                castLog.notice("load \(track.videoId, privacy: .public) at \(position)")
+                self.loadRequestId = self.send(Namespace.media, ["type": "LOAD", "media": media, "autoplay": autoplay, "currentTime": position], to: transportId)
             }
         }
         if transportId != nil { send() } else { onReady = send }
     }
 
-    func play() { mediaCommand("PLAY") }
-    func pause() { mediaCommand("PAUSE") }
+    /// Play and pause show at once and reach the device as soon as it can take them (right after
+    /// a song starts it can't yet); until the device confirms, its reports don't undo them.
+    func play() { request(playing: true) }
+    func pause() { request(playing: false) }
+
+    private func request(playing: Bool) {
+        // Freeze (or restart) the clock where it is.
+        remoteTime = position
+        remoteTimeAt = Date()
+        remotePlaying = playing
+        if !playing { remoteBuffering = false }
+        pendingPlaying = playing
+        pendingSince = Date()
+        pendingPlayingSent = mediaCommand(playing ? "PLAY" : "PAUSE")
+        PlayerController.shared.castStatusChanged()
+    }
 
     func seek(to seconds: TimeInterval) {
         remoteTime = seconds
         remoteTimeAt = Date()
-        mediaCommand("SEEK", ["currentTime": seconds])
+        pendingSeek = mediaCommand("SEEK", ["currentTime": seconds]) ? nil : seconds
     }
 
     /// The receiver's own volume (0…1), like the TV's.
@@ -228,33 +276,41 @@ final class CastController {
         send(Namespace.receiver, ["type": "SET_VOLUME", "volume": ["level": min(1, max(0, level)), "muted": muted]], to: "receiver-0")
     }
 
-    private func mediaCommand(_ type: String, _ extra: [String: Any] = [:]) {
-        guard let transportId, let mediaSessionId else { return }
+    /// Sends a command for the song on the device; false when there's no session to send it to yet.
+    @discardableResult
+    private func mediaCommand(_ type: String, _ extra: [String: Any] = [:]) -> Bool {
+        guard let transportId, let mediaSessionId else { return false }
         var payload = extra
         payload["type"] = type
         payload["mediaSessionId"] = mediaSessionId
         send(Namespace.media, payload, to: transportId)
+        return true
     }
 
     // MARK: Messages
 
-    private func send(_ namespace: String, _ payload: [String: Any], to destination: String) {
-        guard let connection else { return }
+    /// Sends a message; returns the request id it carries (nil when not sent or not numbered).
+    @discardableResult
+    private func send(_ namespace: String, _ payload: [String: Any], to destination: String) -> Int? {
+        guard let connection else { return nil }
         var payload = payload
+        var id: Int?
         if payload["type"] as? String != "PING", payload["type"] as? String != "PONG",
            payload["type"] as? String != "CONNECT", payload["type"] as? String != "CLOSE" {
             payload["requestId"] = requestId
+            id = requestId
             requestId += 1
         }
         // JSONSerialization raises an Objective-C exception (which `try?` doesn't catch) on NaN or
         // infinite numbers: check first rather than take the app down.
         guard JSONSerialization.isValidJSONObject(payload), let json = try? JSONSerialization.data(withJSONObject: payload) else {
             castLog.error("not sent, invalid JSON: \(payload["type"] as? String ?? "?", privacy: .public)")
-            return
+            return nil
         }
         let message = CastMessage(sourceId: Self.senderId, destinationId: destination, namespace: namespace,
                                   payload: String(decoding: json, as: UTF8.self))
         connection.send(content: message.framed(), completion: .contentProcessed { _ in })
+        return id
     }
 
     private func receive(on connection: NWConnection) {
@@ -284,7 +340,15 @@ final class CastController {
             receiverStatus(json)
         case (Namespace.media, "MEDIA_STATUS"):
             mediaStatus(json)
-        case (Namespace.media, "LOAD_FAILED"), (Namespace.media, "LOAD_CANCELLED"), (Namespace.receiver, "LAUNCH_ERROR"):
+        case (Namespace.media, "LOAD_FAILED"), (Namespace.media, "LOAD_CANCELLED"):
+            // A quick skip replaces a load still in progress, and the device cancels that one:
+            // only the latest load's failure means anything.
+            guard let id = json["requestId"] as? Int, id == loadRequestId else {
+                castLog.notice("ignored \(type, privacy: .public) of an earlier load")
+                return
+            }
+            fail(type)
+        case (Namespace.receiver, "LAUNCH_ERROR"):
             fail(type)
         case (Namespace.connection, "CLOSE") where message.sourceId == transportId || message.sourceId == "receiver-0":
             // Someone else took over the device (or it went to sleep).
@@ -319,13 +383,49 @@ final class CastController {
 
     private func mediaStatus(_ json: [String: Any]) {
         guard let status = (json["status"] as? [[String: Any]])?.first else { return }
-        if let id = status["mediaSessionId"] as? Int { mediaSessionId = id }
-        if let time = status["currentTime"] as? Double {
-            remoteTime = time
-            remoteTimeAt = Date()
+        let id = status["mediaSessionId"] as? Int
+        // The song before a skip, still reporting: not what's playing any more.
+        if let id, staleSessionIds.contains(id) { return }
+        // Which session is the latest load's: the one answering its request (or, should a device
+        // not say, any new one once a few seconds have passed).
+        if mediaSessionId == nil, let id {
+            let answersLoad = loadRequestId != nil && json["requestId"] as? Int == loadRequestId
+            guard answersLoad || Date().timeIntervalSince(settlingSince) > 6 else { return }
+        } else if let id, id != mediaSessionId {
+            // Another sender (or the TV's own app) took over: follow it.
+            castLog.notice("session changed to \(id)")
+        }
+        if let id, id != mediaSessionId {
+            mediaSessionId = id
+            // What was asked for before the device could take it.
+            if let pendingPlaying, !pendingPlayingSent { pendingPlayingSent = mediaCommand(pendingPlaying ? "PLAY" : "PAUSE") }
+            if let pendingSeek, mediaCommand("SEEK", ["currentTime": pendingSeek]) { self.pendingSeek = nil }
         }
         let playerState = status["playerState"] as? String ?? ""
-        remotePlaying = playerState == "PLAYING" || playerState == "BUFFERING"
+        castLog.debug("status \(playerState, privacy: .public) session \(id ?? -1) at \(status["currentTime"] as? Double ?? -1) reason \(status["idleReason"] as? String ?? "-", privacy: .public)")
+        // Right after a load the device reports idle and buffering at 0:00 before it seeks to
+        // the asked-for point: until it's actually playing or paused, keep showing the load.
+        if settling, playerState == "PLAYING" || playerState == "PAUSED" || Date().timeIntervalSince(settlingSince) > 20 {
+            settling = false
+        }
+        if settling {
+            if playerState == "IDLE", status["idleReason"] as? String == "ERROR" { fail("ERROR"); return }
+            remoteBuffering = true
+            PlayerController.shared.castStatusChanged()
+            return
+        }
+        let reportedPlaying = playerState == "PLAYING" || playerState == "BUFFERING"
+        // Until the device confirms a play or pause (or a few seconds pass), its older reports
+        // don't flip the button back; the position waits too.
+        let waiting = pendingPlaying.map { $0 != reportedPlaying && Date().timeIntervalSince(pendingSince) < 4 } ?? false
+        if !waiting {
+            pendingPlaying = nil
+            remotePlaying = reportedPlaying
+            if pendingSeek == nil, let time = status["currentTime"] as? Double {
+                remoteTime = time
+                remoteTimeAt = Date()
+            }
+        }
         remoteBuffering = playerState == "BUFFERING"
         if playerState == "IDLE", let reason = status["idleReason"] as? String {
             switch reason {

@@ -28,6 +28,15 @@ final class CastMediaServer {
         return URL(string: "http://\(host):\(port)/cast/\(secret)/\(name)")!
     }
 
+    /// Looks up the next song's stream ahead of time, so a skip while casting doesn't wait for
+    /// YouTube. One request per song, only while casting.
+    func prepare(_ track: Track) async {
+        guard listener != nil, track.localPath == nil, streams[track.videoId] == nil else { return }
+        if let file = AudioCache.cachedFile(for: track.videoId), !WebMOpus.isOpus(file) { return }
+        guard let info = try? await ChainedStreamResolver.shared.resolve(videoId: track.videoId) else { return }
+        streams[track.videoId] = info
+    }
+
     func stop() {
         listener?.cancel()
         listener = nil
