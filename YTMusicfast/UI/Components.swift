@@ -132,7 +132,8 @@ enum TrackMenuEntries {
                                           icon: liked ? .likedSongsRemove : .likedSongs) {
             player.setLiked(!liked, track)
             guard AuthManager.shared.isSignedIn else { return }
-            router.showToast(liked ? String(localized: "Removed from Liked Music") : String(localized: "Added to Liked Music")) { player.setLiked(liked, track) }
+            router.showToast(liked ? String(localized: "Removed from Liked Music") : String(localized: "Added to Liked Music"),
+                             undoName: liked ? String(localized: "Remove Like") : String(localized: "Like")) { player.setLiked(liked, track) }
         }))
         entries += queueEntries
         entries.append(.submenu(String(localized: "Don't recommend"), systemImage: "xmark.circle", dontRecommend(track, filter: filter)))
@@ -366,7 +367,7 @@ enum MediaMenuEntries {
             .action(pinned ? String(localized: "Unpin from Your Library") : String(localized: "Pin to Your Library"),
                     systemImage: pinned ? "pin.slash" : "pin") {
                 library.togglePin(item)
-                if pinned { router.showToast(String(localized: "Unpinned \(item.title)"), icon: "pin.slash") { library.togglePin(item) } }
+                if pinned { router.showToast(String(localized: "Unpinned \(item.title)"), icon: "pin.slash", undoName: String(localized: "Unpin")) { library.togglePin(item) } }
             },
             .divider,
             .submenu(String(localized: "Share"), systemImage: "square.and.arrow.up", [
@@ -730,11 +731,24 @@ struct TrackList: View {
             }
             cursor = target
             proxy.scrollTo(Self.rowID(target))
+        case .menu:
+            // The song the arrow keys are on, else the first selected.
+            guard let index = cursor.flatMap({ selection.contains($0) ? $0 : nil }) ?? selection.min(),
+                  tracks.indices.contains(index) else { return false }
+            proxy.scrollTo(Self.rowID(index))
+            let entries = TrackMenuEntries.make(for: tracks[index], selection: selectedTracks(), editing: editing)
+            let anchor = menuAnchor(index)
+            // Once the row is on screen (it may have just scrolled in).
+            DispatchQueue.main.async {
+                MenuPresenter.shared.showContextMenu(entries, at: MenuAnchorView.menuPoint(for: anchor))
+            }
         }
         return true
     }
 
     private static func rowID(_ index: Int) -> String { "track-row-\(index)" }
+
+    private func menuAnchor(_ index: Int) -> String { "\(clipboardOwner)-\(index)" }
 
     /// ⌘A / ⌘C / ⌘X / ⌘V on songs: select all, copy and cut as music.youtube.com
     /// links, and paste links into your playlist.
@@ -802,7 +816,7 @@ struct TrackList: View {
                         TrackRow(track: tracks[index], index: index, showArtwork: showArtwork, showAlbum: showAlbum,
                                  numbered: numbered, showPlays: showPlays, showArtists: showArtists, showDuration: showsDurations, selected: selection.contains(index), numberWidth: numberWidth,
                                  columns: columns, onSelect: { select(index) }, selection: selectedTracks,
-                                 onDrop: dropHandler(at: index)) {
+                                 onDrop: dropHandler(at: index), menuAnchor: menuAnchor(index)) {
                             if searchOrigin { RecentSearches.add(.track(tracks[index])) }
                             PlayerController.shared.play(tracks, startAt: index, from: context)
                         }
@@ -864,7 +878,8 @@ struct TrackList: View {
 /// What ↑, ↓ and Return act on: the list you last selected songs in.
 @MainActor
 enum SelectionKeys {
-    enum Key { case up, down, play }
+    /// `menu`: the menu key or ⇧F10, for the selected song's menu.
+    enum Key { case up, down, play, menu }
     /// Returns whether the key was used; the Bool says ⇧ was held (extend the selection).
     private(set) static var handler: ((Key, Bool) -> Bool)?
     private static var owner: UUID?
@@ -1177,6 +1192,8 @@ struct TrackRow: View {
     var selection: () -> [Track] = { [] }
     /// Your playlist: another of its songs dropped here moves before this one.
     var onDrop: ((String) -> Bool)?
+    /// Names this row (while selected) for a menu opened from the keyboard.
+    var menuAnchor: String?
     var play: () -> Void
 
     @State private var ownHover = false
@@ -1325,6 +1342,8 @@ struct TrackRow: View {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(selected ? Theme.text.opacity(0.18) : hovering ? Theme.text.opacity(0.1) : .clear)
         )
+        // Only selected rows: the menu key opens their menu here.
+        .background { if selected, let menuAnchor { MenuAnchorView(id: menuAnchor) } }
         // Hidden songs stay in place on album/playlist pages, dimmed, and are skipped.
         .opacity((ContentFilter.shared.isHidden(track) || (player.offlineMode && !PlayerController.availableOffline(track))) && !hovering ? 0.4 : 1)
         .overlay(alignment: .top) {

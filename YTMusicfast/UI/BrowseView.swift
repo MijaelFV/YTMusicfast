@@ -467,7 +467,7 @@ struct BrowseView: View {
         model.removeLocally(removable)
         let playlistId = target.browseId
         router.showToast(removable.count == 1 ? String(localized: "Removed from playlist") : String(localized: "Removed \(removable.count) songs from playlist"),
-                         icon: "trash") { [model, router] in
+                         icon: "trash", undoName: String(localized: "Remove from Playlist")) { [model, router] in
             Task {
                 do {
                     for track in removable {

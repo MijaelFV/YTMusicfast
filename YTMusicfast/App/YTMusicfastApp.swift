@@ -131,6 +131,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            SelectionKeys.handler?(key, flags.contains(.shift)) == true {
             return nil
         }
+        // The menu key (on PC keyboards), or ⇧F10: the selected song's menu.
+        if event.keyCode == 110 || (event.keyCode == 109 && flags.contains(.shift)), !typing,
+           window?.sheetParent == nil, window?.attachedSheet == nil, !MenuPresenter.shared.isOpen,
+           flags.subtracting([.numericPad, .function, .shift]).isEmpty, SelectionKeys.handler?(.menu, false) == true {
+            return nil
+        }
         // One-key shortcuts (M, B, S, R, Q, L, F, /, ?) while no text field has focus.
         if !typing, window?.sheetParent == nil, window?.attachedSheet == nil,
            ["YT Musicfast", "Miniplayer", FullPlayerWindow.title].contains(window?.title ?? ""),

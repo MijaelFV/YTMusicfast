@@ -62,7 +62,8 @@ struct ContentView: View {
                             .buttonStyle(.plain)
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(Theme.accent.mix(with: .black, by: 0.15))
-                            .keyboardShortcut("z")
+                            // ⌘Z is Edit → Undo, which has this change too.
+                            .help("Undo (⌘Z)")
                     }
                 }
                     .font(.system(size: 13, weight: .semibold))
@@ -825,7 +826,8 @@ struct LibraryPanel: View {
                    selected: { if case .page(let open) = router.route { open.browseId == entry.item.target.browseId } else { false } }(),
                    onRemoveFromRecents: local.recentCollections.contains { $0.collectionId == entry.item.collectionId } ? {
                        let index = local.removeRecent(entry.item)
-                       router.showToast(String(localized: "Removed from Recents"), icon: "minus.circle") { local.restoreRecent(entry.item, at: index) }
+                       router.showToast(String(localized: "Removed from Recents"), icon: "minus.circle",
+                                        undoName: String(localized: "Remove from Recents")) { local.restoreRecent(entry.item, at: index) }
                    } : nil) {
             router.open(entry.item.target)
         }
@@ -1114,7 +1116,8 @@ struct LibraryFolderRow: View {
                     // The folder as it is now (its playlists), so Undo puts back exactly this.
                     let current = LocalLibrary.shared.folders.first { $0.id == folder.id } ?? folder
                     let index = LocalLibrary.shared.delete(current)
-                    router.showToast(String(localized: "Deleted folder “\(current.name)”"), icon: "trash") {
+                    router.showToast(String(localized: "Deleted folder “\(current.name)”"), icon: "trash",
+                                     undoName: String(localized: "Delete Folder")) {
                         LocalLibrary.shared.restore(current, at: index)
                     }
                 },

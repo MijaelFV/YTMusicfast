@@ -39,6 +39,8 @@ final class CastController {
     /// Why Cast devices can't be looked for (macOS's Local Network permission), if so.
     private(set) var needsLocalNetworkPermission = false
     private(set) var searching = false
+    /// The current search has looked once (so an empty list means none were found).
+    private(set) var searchedOnce = false
     private(set) var device: CastDevice?
     private(set) var state: State = .idle
     /// Playing on a Cast device (the player sends everything there).
@@ -102,6 +104,7 @@ final class CastController {
         browsers += 1
         guard discovery == nil else { return }
         searching = true
+        searchedOnce = false
         discovery = Task {
             var seen: [String: (device: CastDevice, at: Date)] = [:]
             while !Task.isCancelled {
@@ -117,6 +120,7 @@ final class CastController {
                 // A device that stops answering for a minute has gone (unplugged, off the network).
                 seen = seen.filter { Date().timeIntervalSince($0.value.at) < 60 }
                 devices = seen.values.map(\.device).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                if !searchedOnce { searchedOnce = true }
                 castLog.notice("cast discovery: \(self.devices.count) devices")
                 try? await Task.sleep(for: .seconds(4))
             }

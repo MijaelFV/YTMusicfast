@@ -191,6 +191,7 @@ struct ShortcutsSheet: View {
             (String(localized: "Play a song"), String(localized: "Double-click")), (String(localized: "Select several songs"), "⌘-click / ⇧-click"),
             (String(localized: "Move the selection"), "↑ / ↓ (⇧ to extend)"), (String(localized: "Play the selected song"), String(localized: "Return")),
             (String(localized: "Clear the selection"), String(localized: "Esc")), (String(localized: "Reorder your playlist"), String(localized: "Drag a song")),
+            (String(localized: "Open the selected song's menu"), String(localized: "⇧F10 or the menu key")),
             (String(localized: "Add songs to a playlist"), String(localized: "Drag onto it in Your Library")),
         ]),
     ]

@@ -61,13 +61,25 @@ struct ConnectPanel: View {
                     // Chromecasts, Google TVs and Cast speakers on the network.
                     if cast.needsLocalNetworkPermission {
                         LocalNetworkNotice()
-                    } else if cast.searching, cast.devices.isEmpty {
+                    } else if cast.searching, cast.devices.isEmpty, !cast.searchedOnce {
                         HStack(spacing: 10) {
                             ProgressView().controlSize(.small)
                             Text("Looking for Chromecasts and Google TVs…").font(.system(size: 13)).foregroundStyle(Theme.secondary)
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
+                    } else if cast.searchedOnce, cast.devices.isEmpty {
+                        // Still looking (one turned on now shows up), but say none answered so far.
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("No Cast devices found").font(.system(size: 13, weight: .semibold))
+                            Text("Check that your Chromecast or Google TV is on and on the same Wi-Fi as this Mac.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .accessibilityElement(children: .combine)
                     }
                     ForEach(cast.devices.filter { $0.id != cast.device?.id }) { device in
                         DeviceRow(name: device.name, subtitle: String(localized: "Google Cast"), symbol: device.symbol) {

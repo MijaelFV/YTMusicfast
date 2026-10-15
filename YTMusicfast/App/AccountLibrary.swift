@@ -42,12 +42,14 @@ final class AccountLibrary {
             let pinned = LocalLibrary.shared.isPinned(item)
             LocalLibrary.shared.togglePin(item)
             Router.shared.showToast(pinned ? String(localized: "Removed from Your Library") : String(localized: "Added to Your Library"),
+                                    undoName: String(localized: "Remove from Your Library"),
                                     undo: pinned ? { LocalLibrary.shared.togglePin(item) } : nil)
             return
         }
         let wasSaved = isSaved(item, header: header)
         saved[key(id)] = !wasSaved
         Router.shared.showToast(wasSaved ? String(localized: "Removed from Your Library") : String(localized: "Saved to Your Library"),
+                                undoName: String(localized: "Remove from Your Library"),
                                 undo: wasSaved ? { [weak self] in self?.toggleSaved(item, header: header) } : nil)
         Task {
             do {
@@ -77,6 +79,7 @@ final class AccountLibrary {
         let was = isSubscribed(item, header: header)
         subscriptions[key(channel)] = !was
         Router.shared.showToast(was ? String(localized: "Unsubscribed from \(item.title)") : String(localized: "Subscribed to \(item.title)"),
+                                undoName: String(localized: "Unsubscribe"),
                                 undo: was ? { [weak self] in self?.toggleSubscribed(item, header: header) } : nil)
         Task {
             do {

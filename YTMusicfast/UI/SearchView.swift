@@ -40,6 +40,14 @@ enum RecentSearches {
         UserDefaults.standard.removeObject(forKey: key)
         UserDefaults.standard.removeObject(forKey: itemsKey)
     }
+
+    /// Undo for `clear`: puts back what was there, ahead of anything searched since.
+    static func restore(queries: [String], items restored: [ShelfItem]) {
+        let queries = queries + all.filter { query in !queries.contains { $0.caseInsensitiveCompare(query) == .orderedSame } }
+        UserDefaults.standard.set(Array(queries.prefix(10)), forKey: key)
+        let merged = restored + items.filter { item in !restored.contains { $0.id == item.id } }
+        if let data = try? JSONEncoder().encode(Array(merged.prefix(12))) { UserDefaults.standard.set(data, forKey: itemsKey) }
+    }
 }
 
 /// Results already seen this session, so Back from an artist, or switching between All and
@@ -224,9 +232,16 @@ struct SearchView: View {
         }
         if !recents.isEmpty || !recentItems.isEmpty {
             Button("Clear recent searches") {
+                let (queries, items) = (RecentSearches.all, RecentSearches.items)
                 RecentSearches.clear()
                 recents = []
                 recentItems = []
+                router.showToast(String(localized: "Cleared recent searches"), icon: "clock.arrow.circlepath",
+                                 undoName: String(localized: "Clear Recent Searches")) {
+                    RecentSearches.restore(queries: queries, items: items)
+                    recents = RecentSearches.all
+                    recentItems = RecentSearches.items
+                }
             }
             .buttonStyle(.plain)
             .font(.system(size: 13, weight: .semibold))

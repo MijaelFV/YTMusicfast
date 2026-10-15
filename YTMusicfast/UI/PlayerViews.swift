@@ -216,7 +216,17 @@ struct NowPlayingInfo: View {
                         .onTapGesture { if let album = track.album { router.open(album: album) } }
                         .hoverUnderline()
                     if let error = player.errorMessage {
-                        Text(error).font(.system(size: 11)).foregroundStyle(Theme.accent).lineLimit(1)
+                        HStack(spacing: 8) {
+                            Text(error).font(.system(size: 11)).foregroundStyle(Theme.accent).lineLimit(1)
+                                .help(error)
+                            // Stopped on it (not a failed start of something else while this plays).
+                            if !player.isPlaying {
+                                errorAction(String(localized: "Try Again")) {
+                                    if let index = player.currentIndex, player.queue.indices.contains(index) { player.jump(to: player.queue[index]) }
+                                }
+                                errorAction(String(localized: "Skip")) { player.next() }
+                            }
+                        }
                     } else {
                         ArtistLinks(artists: track.artists, font: .system(size: 12))
                     }
@@ -227,6 +237,15 @@ struct NowPlayingInfo: View {
         } else {
             Color.clear.frame(height: 56)
         }
+    }
+
+    private func errorAction(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.plain)
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(Theme.text)
+            .hoverUnderline()
+            .fixedSize()
     }
 }
 
@@ -381,6 +400,9 @@ struct ProgressScrubber: View {
 
 struct VolumeSlider: View {
     @State private var hovering = false
+    /// Scroll wheel / two-finger scroll over the slider changes the volume; watched only while
+    /// the pointer is on it.
+    @State private var scrollMonitor: Any?
 
     var body: some View {
         @Bindable var player = PlayerController.shared
@@ -420,7 +442,41 @@ struct VolumeSlider: View {
                 player.volume = min(1, max(0, player.volume + (direction == .increment ? 0.1 : -0.1)))
             }
         }
-        .onHover { hovering = $0 }
+        .onHover { inside in
+            hovering = inside
+            if inside { watchScrolling() } else { stopWatchingScrolling() }
+        }
+        .onDisappear { stopWatchingScrolling() }
+    }
+
+    private func watchScrolling() {
+        guard scrollMonitor == nil else { return }
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            MainActor.assumeIsolated {
+                // Up or right is louder, whichever way the system scrolls content.
+                let inverted = event.isDirectionInvertedFromDevice
+                let vertical = inverted ? -event.scrollingDeltaY : event.scrollingDeltaY
+                let horizontal = inverted ? event.scrollingDeltaX : -event.scrollingDeltaX
+                let delta = abs(vertical) >= abs(horizontal) ? vertical : horizontal
+                guard delta != 0 else { return nil }
+                // A trackpad reports points, a wheel lines: about 5% a notch.
+                let step = event.hasPreciseScrollingDeltas ? delta * 0.004 : delta * 0.05
+                let player = PlayerController.shared
+                if player.isMuted {
+                    // Muted: up turns it on from silence (not straight back to the old level).
+                    guard step > 0 else { return nil }
+                    player.volume = 0
+                    player.isMuted = false
+                }
+                player.volume = min(1, max(0, player.volume + step))
+                return nil
+            }
+        }
+    }
+
+    private func stopWatchingScrolling() {
+        if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
+        scrollMonitor = nil
     }
 }
 
@@ -749,6 +805,58 @@ struct QueuePanel: View {
     @State private var tab = 0
     /// Songs are being dragged over the queue.
     @State private var dropTargeted = false
+    /// Selected songs (click, ⌘-click, ⇧-click, or ↑ / ↓ with ⇧): removed, moved or dragged together.
+    @State private var selection: Set<QueueEntry.ID> = []
+    /// Where a ⇧ range starts, and the end the arrow keys move.
+    @State private var anchor: QueueEntry.ID?
+    @State private var cursor: QueueEntry.ID?
+    /// Identifies the queue as the list the arrow keys, Return and Delete act on.
+    @State private var keysOwner = UUID()
+    private var player: PlayerController { .shared }
+
+    /// The selection in queue order.
+    private func selectedEntries() -> [QueueEntry] { player.queue.filter { selection.contains($0.id) } }
+
+    private func removeSelected() -> Bool {
+        let playing = player.currentIndex.map { player.queue[$0].id }
+        let removable = selectedEntries().filter { $0.id != playing }
+        guard !removable.isEmpty else { return false }
+        selection = []
+        player.remove(removable)
+        return true
+    }
+
+    /// ↑ / ↓ move the selection (⇧ extends it), Return plays the first selected song, and the
+    /// menu key opens its menu: the same keys as a page's song list.
+    private func handleKey(_ key: SelectionKeys.Key, extend: Bool, proxy: ScrollViewProxy) -> Bool {
+        let queue = player.queue
+        let positions = queue.indices.filter { selection.contains(queue[$0].id) }
+        guard let first = positions.first, let last = positions.last else { return false }
+        let position = { (id: QueueEntry.ID?) in id.flatMap { id in queue.firstIndex { $0.id == id } } }
+        switch key {
+        case .play:
+            if first == player.currentIndex { player.togglePlayPause() } else { player.jump(to: queue[first]) }
+        case .up, .down:
+            let from = position(cursor) ?? (key == .up ? first : last)
+            let target = min(max(0, from + (key == .up ? -1 : 1)), queue.count - 1)
+            if extend, let start = position(anchor) {
+                selection = Set(queue[min(start, target)...max(start, target)].map(\.id))
+            } else {
+                selection = [queue[target].id]
+                anchor = queue[target].id
+            }
+            cursor = queue[target].id
+            if target == player.currentIndex { proxy.scrollTo(Self.currentRowID) } else { proxy.scrollTo(queue[target].id) }
+        case .menu:
+            let index = position(cursor).flatMap { positions.contains($0) ? $0 : nil } ?? first
+            let entry = queue[index]
+            let entries = QueueRow.menuEntries(for: entry, isCurrent: index == player.currentIndex, group: selectedEntries())
+            DispatchQueue.main.async {
+                MenuPresenter.shared.showContextMenu(entries, at: MenuAnchorView.menuPoint(for: "\(keysOwner)-\(entry.id)"))
+            }
+        }
+        return true
+    }
 
     /// Songs dropped on the queue go to its end (or play, when nothing is).
     private func addDropped(_ payloads: [String]) -> Bool {
@@ -789,7 +897,7 @@ struct QueuePanel: View {
                 RelatedList()
             } else {
             ScrollViewReader { proxy in
-            List {
+            List(selection: $selection) {
                 // In a listening session: who's listening, and a way out, at the top of the queue.
                 if ListenTogether.shared.role != .off {
                     SessionCard()
@@ -801,7 +909,7 @@ struct QueuePanel: View {
                 if !player.played.isEmpty {
                     Section {
                         ForEach(Array(player.played)) { entry in
-                            QueueRow(entry: entry)
+                            queueRow(entry)
                         }
                     } header: {
                         Text("Played").font(.cardTitle).foregroundStyle(Theme.secondary)
@@ -809,7 +917,7 @@ struct QueuePanel: View {
                 }
                 if let index = player.currentIndex, player.queue.indices.contains(index) {
                     Section {
-                        QueueRow(entry: player.queue[index], isCurrent: true)
+                        queueRow(player.queue[index], isCurrent: true)
                             .id(Self.currentRowID)
                     } header: {
                         Text("Now playing").font(.cardTitle).foregroundStyle(Theme.text)
@@ -817,7 +925,7 @@ struct QueuePanel: View {
                 }
                 Section {
                     ForEach(Array(player.upNext)) { entry in
-                        QueueRow(entry: entry)
+                        queueRow(entry)
                     }
                     .onMove { player.moveUpcoming(from: $0, to: $1) }
                 } header: {
@@ -854,6 +962,20 @@ struct QueuePanel: View {
             // Opens on the song that's playing (played ones are above), and follows it.
             .onAppear { proxy.scrollTo(Self.currentRowID, anchor: .top) }
             .onChange(of: player.currentIndex) { proxy.scrollTo(Self.currentRowID, anchor: .top) }
+            .onChange(of: selection) { _, selected in
+                if selected.count == 1 { anchor = selected.first; cursor = selected.first }
+                guard !selected.isEmpty else {
+                    SelectionKeys.unregister(keysOwner)
+                    return
+                }
+                // Like a page's song list: the keys act on the list you last selected in.
+                SelectionKeys.register(keysOwner) { key, extend in handleKey(key, extend: extend, proxy: proxy) }
+                SelectionDelete.handler = { removeSelected() }
+            }
+            .onDisappear {
+                SelectionKeys.unregister(keysOwner)
+                if !selection.isEmpty { SelectionDelete.handler = nil }
+            }
             }
             // Drag songs here from any list to queue them. (The list's own reordering is a
             // different kind of drag, so it still works.)
@@ -868,6 +990,12 @@ struct QueuePanel: View {
             .dropDestination(for: String.self) { items, _ in addDropped(items) } isTargeted: { dropTargeted = $0 }
             }
         }
+    }
+
+    private func queueRow(_ entry: QueueEntry, isCurrent: Bool = false) -> some View {
+        QueueRow(entry: entry, isCurrent: isCurrent, selected: selection.contains(entry.id), selectedEntries: selectedEntries,
+                 menuAnchor: "\(keysOwner)-\(entry.id)")
+            .tag(entry.id)
     }
 
     private func tabs(fontSize: CGFloat, spacing: CGFloat) -> some View {
@@ -1030,6 +1158,11 @@ struct QueueRow: View {
     var entry: QueueEntry
     var isCurrent = false
     var isHistory = false
+    /// Selected in the queue, and the whole selection (asked for only when a menu needs it).
+    var selected = false
+    var selectedEntries: () -> [QueueEntry] = { [] }
+    /// Names this row (while selected) for a menu opened from the keyboard.
+    var menuAnchor: String?
     @State private var hovering = false
     @State private var engaged = false
     @State private var token = UUID()
@@ -1111,26 +1244,53 @@ struct QueueRow: View {
             }
         }
         .onDisappear { RowDoubleClick.hover(token, false) {} }
-        .listRowBackground(RoundedRectangle(cornerRadius: 6).fill(hovering ? Theme.hover : .clear).padding(.horizontal, 6))
+        .background { if selected, let menuAnchor { MenuAnchorView(id: menuAnchor) } }
+        .listRowBackground(RoundedRectangle(cornerRadius: 6)
+            .fill(selected ? Theme.text.opacity(0.18) : hovering ? Theme.hover : .clear).padding(.horizontal, 6))
         .listRowSeparator(.hidden)
         .menuOnRightClick(hovering: hovering) {
-            var entries: [MenuEntry] = []
             if isHistory {
-                entries += [.action(String(localized: "Play Now"), systemImage: "play.fill") { player.playRadio(from: entry.track) }, .divider]
-            } else if !isCurrent {
-                entries += [
-                    .action(String(localized: "Play Now"), systemImage: "play.fill") { player.jump(to: entry) },
-                    .action(String(localized: "Remove from Queue"), systemImage: "minus.circle") { player.remove(entry) },
-                    .divider,
-                ]
+                return [.action(String(localized: "Play Now"), systemImage: "play.fill") { player.playRadio(from: entry.track) }, .divider]
+                    + TrackMenuEntries.make(for: entry.track)
             }
-            return entries + TrackMenuEntries.make(for: entry.track)
+            return Self.menuEntries(for: entry, isCurrent: isCurrent, group: selected ? selectedEntries() : [])
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(entry.track.title), \(entry.track.artistLine)")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { if isHistory { player.playRadio(from: entry.track) } else { player.jump(to: entry) } }
         .accessibilityAction(named: "Remove from Queue") { if !isHistory { player.remove(entry) } }
+    }
+}
+
+extension QueueRow {
+    /// A queue song's menu; with several selected (`group`), it acts on all of them.
+    @MainActor static func menuEntries(for entry: QueueEntry, isCurrent: Bool, group: [QueueEntry]) -> [MenuEntry] {
+        let player = PlayerController.shared
+        if group.count > 1, group.contains(where: { $0.id == entry.id }) {
+            let playing = player.currentIndex.map { player.queue[$0].id }
+            let others = group.filter { $0.id != playing }
+            var entries: [MenuEntry] = []
+            if !others.isEmpty {
+                entries += [
+                    // Moves these (Play Next would queue them again).
+                    .action(String(localized: "Move to Top of Queue"), systemImage: "arrow.up.to.line") { player.moveToTop(others) },
+                    .action(others.count == 1 ? String(localized: "Remove from Queue") : String(localized: "Remove \(others.count) Songs from Queue"),
+                            systemImage: "minus.circle") { player.remove(others) },
+                    .divider,
+                ]
+            }
+            return entries + TrackMenuEntries.make(for: entry.track, selection: group.map(\.track))
+        }
+        var entries: [MenuEntry] = []
+        if !isCurrent {
+            entries += [
+                .action(String(localized: "Play Now"), systemImage: "play.fill") { player.jump(to: entry) },
+                .action(String(localized: "Remove from Queue"), systemImage: "minus.circle") { player.remove(entry) },
+                .divider,
+            ]
+        }
+        return entries + TrackMenuEntries.make(for: entry.track)
     }
 }
 

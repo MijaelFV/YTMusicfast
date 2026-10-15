@@ -8,7 +8,7 @@ loading / offline / error states, and consistent spacing and type. Gaps are rank
 - **Medium** — a convention people expect from a desktop app is missing or inconsistent.
 - **Low** — polish; worth doing when the area is touched next.
 
-High and medium items are fixed in the same change as this document (marked ✅).
+High and medium items were fixed in the same change as this document, and the low ones after it (marked ✅).
 
 ## What already meets the bar
 
@@ -50,17 +50,17 @@ Most of the app was already there, so this list is short on purpose:
 | M5 | Theme.swift | Type sizes were set ad hoc in each view (sizes 8–32 in ~25 combinations); section titles repeated `size: 22, weight: .bold` in 12 places. | ✅ A small type scale in `Theme.swift` (`pageTitle`, `sectionTitle`, `cardTitle`, `rowTitle`, `detail`); page, section, sheet and card titles use it. The remaining one-off sizes move over as views are touched. |
 | M6 | Stats, durations | "1 hr 20 min" was built from English words and skipped the string catalog. | ✅ Uses the system's localized duration formatter. |
 
-## Low (not fixed here)
+## Low
 
-| # | Screen | Gap |
-|---|---|---|
-| L1 | Edit menu | Undo lives on the toast (⌘Z while it shows); Apple expects Edit → Undo to name the last action and keep it available. A real undo stack would cover text fields too, so it needs care. [6] |
-| L2 | Song rows | No keyboard way to open a song's menu (⇧F10 or the menu key in other desktop apps). [7] |
-| L3 | Volume | The volume slider ignores the scroll wheel / two-finger scroll. |
-| L4 | Connect | When the search for Cast devices finishes with none, nothing says so (only the spinner disappears). |
-| L5 | Search | "Clear recent searches" has no undo. |
-| L6 | Queue | No multi-select in the queue (remove or move several at once). |
-| L7 | Player bar | A playback error replaces the artist line in accent colour with no action (e.g. Try Again / Skip). |
+| # | Screen | Gap | Fix |
+|---|---|---|---|
+| L1 | Edit menu | Undo lived on the toast (⌘Z while it showed); Apple expects Edit → Undo to name the last action and keep it available. A real undo stack would cover text fields too, so it needs care. [6] | ✅ Every change a toast can undo also goes in the main window's undo manager with a name ("Undo Clear Queue", "Undo Remove from Playlist"), so Edit → Undo / ⌘Z offers it after the toast is gone. Text fields share that undo manager as usual, so ⌘Z while typing still undoes the typing first. The last 20 changes are kept. |
+| L2 | Song rows | No keyboard way to open a song's menu (⇧F10 or the menu key in other desktop apps). [7] | ✅ ⇧F10 or the menu key opens the selected song's menu (the whole selection's when several are), under its row, in page lists and the queue; the menu itself already works with ↑ / ↓ / Return / Esc. |
+| L3 | Volume | The volume slider ignored the scroll wheel / two-finger scroll. | ✅ Scrolling over it (up or right is louder) changes the volume; the scroll monitor exists only while the pointer is on the slider. |
+| L4 | Connect | When the search for Cast devices finished with none, nothing said so (only the spinner disappeared). | ✅ After the first search finds none, "No Cast devices found" with what to check; it keeps looking, so one turned on later still appears. |
+| L5 | Search | "Clear recent searches" had no undo. | ✅ "Cleared recent searches" toast with **Undo** (and Edit → Undo). |
+| L6 | Queue | No multi-select in the queue (remove or move several at once). | ✅ Click, ⌘-click, ⇧-click or ⇧-↑ / ↓ select several; Delete or the menu removes them (with Undo) and "Move to Top of Queue" plays them next. |
+| L7 | Player bar | A playback error replaced the artist line in accent colour with no action. | ✅ **Try Again** and **Skip** beside the error while playback is stopped on it. |
 
 ## Sources
 

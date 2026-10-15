@@ -217,13 +217,18 @@ final class Router {
         var icon: String
         /// "Undo" on toasts for changes that are easy to regret.
         var undo: (() -> Void)?
+        /// Its change in Edit → Undo: undone from there, the toast goes too.
+        fileprivate var undoKey: ObjectIdentifier?
 
         static func == (a: Toast, b: Toast) -> Bool { a.id == b.id }
     }
     private(set) var toast: Toast?
 
-    func showToast(_ message: String, icon: String = "checkmark.circle.fill", undo: (() -> Void)? = nil) {
-        let next = Toast(message: message, icon: icon, undo: undo)
+    /// `undoName` names the change in Edit → Undo ("Undo Clear Queue"); the toast's message
+    /// when there's none.
+    func showToast(_ message: String, icon: String = "checkmark.circle.fill", undoName: String? = nil, undo: (() -> Void)? = nil) {
+        var next = Toast(message: message, icon: icon)
+        if let undo { (next.undoKey, next.undo) = registerUndo(undoName ?? message, undo) }
         toast = next
         Task {
             // Longer when there's something to undo.
@@ -237,6 +242,40 @@ final class Router {
         guard let toast else { return }
         self.toast = nil
         toast.undo?()
+    }
+
+    // MARK: Undo
+
+    /// One undoable change in the main window's undo manager.
+    private final class UndoAction {}
+    /// The changes still in Edit → Undo, oldest first. Kept here because the undo manager doesn't
+    /// keep its targets alive; the oldest drop out past a few, like a short undo history.
+    @ObservationIgnored private var undoActions: [UndoAction] = []
+
+    /// Puts a change in Edit → Undo (named, and there after the toast goes), alongside the text
+    /// fields' own undo in the same window. Returns what the toast's Undo runs: the same change,
+    /// taken off the menu.
+    private func registerUndo(_ name: String, _ action: @escaping () -> Void) -> (ObjectIdentifier?, () -> Void) {
+        guard let manager = NSApp.windows.first(where: { $0.title == "YT Musicfast" })?.undoManager else { return (nil, action) }
+        let target = UndoAction()
+        let key = ObjectIdentifier(target)
+        manager.registerUndo(withTarget: target) { [weak self] target in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.undoActions.removeAll { $0 === target }
+                // Undone from the menu while its toast still offers it.
+                if self.toast?.undoKey == key { self.toast = nil }
+                action()
+            }
+        }
+        manager.setActionName(name)
+        undoActions.append(target)
+        if undoActions.count > 20 { manager.removeAllActions(withTarget: undoActions.removeFirst()) }
+        return (key, { [weak self, weak manager] in
+            manager?.removeAllActions(withTarget: target)
+            self?.undoActions.removeAll { $0 === target }
+            action()
+        })
     }
 
     // MARK: Well-known pages

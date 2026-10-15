@@ -81,6 +81,37 @@ enum MenuIcon {
 
 // MARK: - Presenting
 
+/// Marks a view (a selected song's row) as where a menu opened from the keyboard appears.
+/// Only put on selected rows, so there are just a few.
+struct MenuAnchorView: NSViewRepresentable {
+    var id: String
+
+    @MainActor private static var views: [String: Weak] = [:]
+    private struct Weak { weak var view: NSView? }
+
+    /// Just under the start of the row's title, in screen coordinates; nil when it isn't on screen.
+    @MainActor static func menuPoint(for id: String) -> NSPoint? {
+        guard let view = views[id]?.view, let window = view.window else { return nil }
+        let frame = window.convertToScreen(view.convert(view.bounds, to: nil))
+        return NSPoint(x: frame.minX + 56, y: frame.minY + 6)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        Self.views = Self.views.filter { $0.value.view != nil }
+        Self.views[id] = Weak(view: view)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        if Self.views[id]?.view !== view { Self.views[id] = Weak(view: view) }
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: ()) {
+        views = views.filter { $0.value.view != nil && $0.value.view !== view }
+    }
+}
+
 /// Shows the app's menus in floating panels above the window — at the pointer for right-clicks,
 /// under the button for ⋯ and pickers. One menu (plus its open submenus) at a time.
 ///
@@ -103,9 +134,10 @@ final class MenuPresenter {
 
     enum Alignment { case leading, trailing }
 
-    /// A right-click menu: its top-left corner at the pointer.
-    func showContextMenu(_ entries: [MenuEntry]) {
-        let point = NSEvent.mouseLocation
+    /// A right-click menu: its top-left corner at the pointer (or at `point`, for one opened from
+    /// the keyboard).
+    func showContextMenu(_ entries: [MenuEntry], at point: NSPoint? = nil) {
+        let point = point ?? NSEvent.mouseLocation
         show(entries, place: { size, screen in
             Self.fit(NSRect(x: point.x, y: point.y - size.height, width: size.width, height: size.height),
                      in: screen, flipFrom: NSRect(origin: point, size: .zero))

@@ -1104,7 +1104,8 @@ final class PlayerController {
         queue.remove(at: index)
         if let current = currentIndex, index < current { currentIndex = current - 1 }
         resyncUpcoming()
-        Router.shared.showToast(String(localized: "Removed from queue"), icon: "minus.circle") { [weak self] in
+        Router.shared.showToast(String(localized: "Removed from queue"), icon: "minus.circle",
+                                undoName: String(localized: "Remove from Queue")) { [weak self] in
             guard let self, let current = self.currentIndex else { return }
             if wasPlayed {
                 // Back where it was, before the song that's playing.
@@ -1117,6 +1118,45 @@ final class PlayerController {
         }
     }
 
+    /// Several songs out of the queue at once (never the one playing), with Undo putting them back
+    /// where they were.
+    func remove(_ entries: [QueueEntry]) {
+        if entries.count == 1, let entry = entries.first { remove(entry); return }
+        guard let current = currentIndex else { return }
+        let playing = queue[current].id
+        let ids = Set(entries.map(\.id)).subtracting([playing])
+        // With their places, first to last, so putting them back in order lands each where it was.
+        let removed = queue.enumerated().filter { ids.contains($0.element.id) }
+        guard !removed.isEmpty else { return }
+        queue.removeAll { ids.contains($0.id) }
+        currentIndex = queue.firstIndex { $0.id == playing }
+        resyncUpcoming()
+        Router.shared.showToast(String(localized: "Removed \(removed.count) songs from queue"), icon: "minus.circle",
+                                undoName: String(localized: "Remove from Queue")) { [weak self] in
+            guard let self, let now = self.currentIndex else { return }
+            let playing = self.queue[now].id
+            for (offset, entry) in removed where !self.queue.contains(where: { $0.id == entry.id }) {
+                self.queue.insert(entry, at: min(offset, self.queue.count))
+            }
+            self.currentIndex = self.queue.firstIndex { $0.id == playing }
+            self.resyncUpcoming()
+        }
+    }
+
+    /// Songs from anywhere in the queue to just after the one playing, keeping their order.
+    func moveToTop(_ entries: [QueueEntry]) {
+        guard let current = currentIndex else { return }
+        let playing = queue[current].id
+        let ids = Set(entries.map(\.id)).subtracting([playing])
+        let moving = queue.filter { ids.contains($0.id) }
+        guard !moving.isEmpty else { return }
+        queue.removeAll { ids.contains($0.id) }
+        guard let now = queue.firstIndex(where: { $0.id == playing }) else { return }
+        queue.insert(contentsOf: moving, at: now + 1)
+        currentIndex = now
+        resyncUpcoming()
+    }
+
     /// "Clear queue", with Undo putting everything back.
     func clearUpcomingWithUndo() {
         guard let index = currentIndex else { return }
@@ -1124,7 +1164,7 @@ final class PlayerController {
         let continuation = radioContinuation
         clearUpcoming()
         guard !removed.isEmpty else { return }
-        Router.shared.showToast(String(localized: "Queue cleared"), icon: "list.bullet") { [weak self] in
+        Router.shared.showToast(String(localized: "Queue cleared"), icon: "list.bullet", undoName: String(localized: "Clear Queue")) { [weak self] in
             guard let self, self.currentIndex != nil else { return }
             self.queue += removed.filter { entry in !self.queue.contains { $0.id == entry.id } }
             self.radioContinuation = continuation

@@ -133,7 +133,7 @@ final class ContentFilter {
         snoozed[track.videoId] = Date().addingTimeInterval(30 * 86_400)
         Self.store(snoozed, "filter.snoozed")
         version += 1
-        Router.shared.showToast(String(localized: "Snoozed for 30 days"), icon: "moon.zzz.fill") { [weak self] in self?.unsnooze(track) }
+        Router.shared.showToast(String(localized: "Snoozed for 30 days"), icon: "moon.zzz.fill", undoName: String(localized: "Snooze")) { [weak self] in self?.unsnooze(track) }
         PlayerController.shared.contentFilterChanged()
     }
 
@@ -184,7 +184,7 @@ final class ContentFilter {
         save()
         let ids = Set(fresh.map(\.videoId))
         Router.shared.showToast(fresh.count == 1 ? String(localized: "Hidden — you won't hear this song") : String(localized: "Hidden \(fresh.count) songs"),
-                                icon: "eye.slash.fill") { [weak self] in self?.unhide(songIds: ids) }
+                                icon: "eye.slash.fill", undoName: String(localized: "Hide")) { [weak self] in self?.unhide(songIds: ids) }
         PlayerController.shared.contentFilterChanged()
     }
 
@@ -199,7 +199,8 @@ final class ContentFilter {
         guard !matches(hiddenArtists, artist) else { return }
         hiddenArtists.insert(Entry(id: Self.key(artist), name: artist.name), at: 0)
         save()
-        Router.shared.showToast(String(localized: "You won't hear \(artist.name)"), icon: "person.crop.circle.badge.xmark") { [weak self] in
+        Router.shared.showToast(String(localized: "You won't hear \(artist.name)"), icon: "person.crop.circle.badge.xmark",
+                                undoName: String(localized: "Hide Artist")) { [weak self] in
             self?.unhide(artistId: Self.key(artist))
         }
         PlayerController.shared.contentFilterChanged()
@@ -227,7 +228,7 @@ final class ContentFilter {
         }
         let artistName = track.artists.first?.name ?? String(localized: "the artist")
         Router.shared.showToast(includingArtist ? String(localized: "Marked \(artistName) as AI") : String(localized: "Marked as AI"),
-                                icon: "sparkles") { [weak self] in
+                                icon: "sparkles", undoName: String(localized: "Mark as AI")) { [weak self] in
             self?.unmarkAI(songId: track.videoId, artistId: includingArtist ? track.artists.first.map(Self.key) : nil)
         }
         PlayerController.shared.contentFilterChanged()
@@ -237,7 +238,7 @@ final class ContentFilter {
         guard !matches(aiArtists, artist) else { return }
         aiArtists.insert(Entry(id: Self.key(artist), name: artist.name), at: 0)
         save()
-        Router.shared.showToast(String(localized: "Marked \(artist.name) as AI"), icon: "sparkles") { [weak self] in
+        Router.shared.showToast(String(localized: "Marked \(artist.name) as AI"), icon: "sparkles", undoName: String(localized: "Mark as AI")) { [weak self] in
             self?.unmarkAI(songId: nil, artistId: Self.key(artist))
         }
         PlayerController.shared.contentFilterChanged()

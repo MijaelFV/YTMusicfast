@@ -125,7 +125,7 @@ final class DownloadManager {
             try? FileManager.default.removeItem(at: Self.fileURL(for: id))
             downloaded.remove(id)
         }
-        Router.shared.showToast(String(localized: "Removed download"), icon: "arrow.down.circle") { [weak self] in
+        Router.shared.showToast(String(localized: "Removed download"), icon: "arrow.down.circle", undoName: String(localized: "Remove Download")) { [weak self] in
             self?.download(removed.item, header: removed.header, tracks: removed.tracks)
         }
     }
