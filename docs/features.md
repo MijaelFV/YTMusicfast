@@ -2,36 +2,35 @@
 
 ## Beyond YouTube Music
 
-What you don't get from YouTube Music in a browser tab:
+What YouTube Music on the web doesn't offer:
 
 - **A real Mac app** — native SwiftUI + AVFoundation, ~150 MB of RAM instead of a browser tab, 0% CPU while idle
-- **Better sound** — YouTube's Opus stream (~160 kbps) instead of its 128 kbps AAC; with **Premium**, Premium's own
-  **Opus 256 kbps**. Plus a 10-band **equalizer** with presets, **crossfade** (0–12 s), **gapless** playback,
-  **volume normalization**, **balance** and **mono audio**
 - **Downloads and offline** — save albums and playlists (including Liked Music); **Offline Mode**; songs you've played
   are kept for instant, data-free replays (500 MB–10 GB); search finds your own music when you're offline
-- **Music videos up to 4K** — every size YouTube offers (1440p/4K on Macs that decode AV1), chosen by the size it's
-  shown at and your connection, or fixed from the ⚙︎ **Video quality** menu (which, in full screen, can also make a
-  video fill the screen)
+- **Equalizer and crossfade** — a 10-band **equalizer** with presets, **crossfade** (0–12 s), **balance** and
+  **mono audio**
 - **Content filter** — hide AI-generated music (your marks, a shared AI-artist list, tell-tale titles and YouTube's
   "altered or synthetic content" label), explicit songs, unplayable songs, and artists or songs you hide — at hand in
   search too
-- **Your Stats** — top songs and artists, minutes listened and when you listen (4 weeks to all time), kept on your Mac;
-  save your top songs as a playlist; an **On repeat** shelf on Home
+- **Your Stats** — top songs and artists, minutes listened and when you listen (4 weeks to all time), kept on your Mac
+  and there whenever you look; save your top songs as a playlist; an **On repeat** shelf on Home
 - **Listen together** — listening sessions with people nearby: you let each person in, then everyone can play, pause,
   skip and add songs
-- **Play anywhere** — **Google Cast** (Chromecast, Google TV, Nest), **AirPlay** (HomePod, Apple TV, smart TVs) and any
-  speaker or headphones from the Connect panel; a **phone remote** in your phone's browser (QR code + PIN)
-- **Local Files** — play music folders from your Mac alongside YouTube Music
-- **Smart Shuffle**, **Snooze** a song for 30 days, a **sleep timer** and **playback speed** (0.5–2×)
-- **Skip non-music parts** of music videos — intros, skits and outros marked by the SponsorBlock community (optional)
-- **Visualizer** in the player bar — spectrum or waveform in the cover's colours (off by default)
-- **Lyrics translation** on-device, **chapters** for long videos and podcasts, song credits
+- **Sleep timer**
+
+## Extras
+
 - **Full-screen TV mode** (⇧⌘F) — a lean-back player made for a big screen: the cover's colours over the whole
   screen, a big cover and title, controls that fade while the music plays (or pin them), an **Up next / Related** rail,
   synced **lyrics** beside the cover or as captions over a music video, an "Up next" card near the end of a song, and
   a clock. Works like a remote — arrows move a highlight, Return presses it, ← → seek and ↑ ↓ set the volume when the
   controls are hidden — and a trackpad swipe skips songs; the screen stays awake while it plays
+- **Smart Shuffle**, **Snooze** a song for 30 days and **playback speed** (0.5–2×)
+- **Phone remote** in your phone's browser (QR code + PIN)
+- **Local Files** — play music folders from your Mac alongside YouTube Music
+- **Skip non-music parts** of music videos — intros, skits and outros marked by the SponsorBlock community (optional)
+- **Visualizer** in the player bar — spectrum or waveform in the cover's colours (off by default)
+- **Lyrics translation** on-device, **chapters** for long videos and podcasts, song credits
 
 ## Everything you use in YouTube Music
 
@@ -51,6 +50,13 @@ What you don't get from YouTube Music in a browser tab:
 - **Queue** with drag-to-reorder and endless Autoplay; played songs stay in it and any song plays with a click
 - **Song/Video switch** and a **player page** — the cover or music video big in the middle (click the player bar, ⌥⌘P);
   the next songs play in the mode you're in, their music video or their song version ready before they start
+- **Sound** — YouTube's **Opus** stream; with **Premium**, Premium's own **Opus 256 kbps**; **gapless** playback and
+  **volume normalization**
+- **Music videos up to 4K** — every size YouTube offers (1440p/4K on Macs that decode AV1), chosen by the size it's
+  shown at and your connection, or fixed from the ⚙︎ **Video quality** menu (which, in full screen, can also make a
+  video fill the screen)
+- **Play anywhere** — **Google Cast** (Chromecast, Google TV, Nest), **AirPlay** (HomePod, Apple TV, smart TVs) and any
+  speaker or headphones from the Connect panel
 - **Thumbs up / down** — a thumbs down skips the song and plays less like it
 - Time-synced **lyrics**, **comments** (sort, replies, post), "Related" music, **podcasts** (Episodes for Later,
   resume where you stopped), **uploads** of your own songs, private session

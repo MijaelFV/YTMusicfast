@@ -48,7 +48,7 @@ Open Anyway**. It updates itself after that. Requires macOS 15 Sequoia or later.
 
 | | |
 |---|---|
-| **Better sound** | YouTube's Opus stream instead of 128 kbps AAC; Premium's Opus 256 kbps with a Premium account. 10-band EQ, crossfade, gapless, volume normalization |
+| **Sound** | Opus up to 256 kbps with Premium; 10-band EQ, crossfade, gapless playback, volume normalization |
 | **Full-screen TV mode** | The cover's colours across the screen, synced lyrics, an Up next rail, music videos up to 4K; driven with the arrow keys like a remote |
 | **Offline** | Download albums and playlists; songs you've played replay instantly without data |
 | **Content filter** | Hide AI-generated music, explicit songs, and artists or songs you choose |
