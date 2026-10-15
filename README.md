@@ -16,9 +16,9 @@ SwiftUI + AVFoundation. An 8 MB download, ~150 MB of RAM, 0% CPU when idle. No E
 </p>
 
 <p align="center">
-  <a href="https://github.com/MijaelFV/YTMusicfast/actions/workflows/ci.yml"><img src="https://github.com/MijaelFV/YTMusicfast/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/macOS-15%2B-24292f" alt="macOS 15 or later">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
+  <a href="docs/development.md"><img src="https://img.shields.io/badge/Built_with-Swift-F05138" alt="Built with Swift"></a>
+  <img src="https://img.shields.io/badge/macOS_15_or_later-24292f" alt="macOS 15 or later">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F05138" alt="MIT license"></a>
 </p>
 
 ![YT Musicfast: Your Library, Home and the Now Playing panel](docs/screenshots/main-window.jpg)
