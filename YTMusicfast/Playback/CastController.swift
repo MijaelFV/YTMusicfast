@@ -117,6 +117,23 @@ final class CastController {
     @ObservationIgnored private var jumpItemId: Int?
     @ObservationIgnored private var jumpRequestId: Int?
 
+    /// Playing through the TV's own YouTube app (see `TVYouTubeApp`): the TV fetches the songs
+    /// itself and this Mac only sends it commands, so this Mac may sleep meanwhile.
+    private(set) var viaYouTubeApp = false
+    /// The app launched (or being launched) on the device: Google's media receiver or YouTube's.
+    @ObservationIgnored private var launchedApp = CastController.mediaReceiver
+    @ObservationIgnored private var lounge: YouTubeLounge?
+    @ObservationIgnored private var pairingTimeout: Task<Void, Never>?
+    @ObservationIgnored private var tvSending: Task<Void, Never>?
+    /// The videos last sent to the TV (the first to play, the queue's next ones after it), and the
+    /// one the TV last said it's on.
+    @ObservationIgnored private var sentVideoIds: [String] = []
+    @ObservationIgnored private var tvVideoId: String?
+    /// The queue's next song, asked for while the TV was still starting the song (see `tvSetNext`).
+    @ObservationIgnored private var tvWantedNext: Track?
+    /// Switching between the two apps mid-song: where the new one carries on from.
+    @ObservationIgnored private var handOver: (position: TimeInterval, playing: Bool)?
+
     /// A song sent to the device's queue, to play after the one playing.
     private struct QueuedSong {
         var track: Track
@@ -206,6 +223,7 @@ final class CastController {
         if self.device != nil { disconnect(resumeLocally: false) }
         self.device = device
         videoRefused = false
+        launchedApp = TVYouTubeApp.shared.isOn(for: device) ? Lounge.castAppId : Self.mediaReceiver
         state = .connecting
         let tls = NWProtocolTLS.Options()
         // Cast devices present a self-signed certificate (as with Google's own senders).
@@ -224,6 +242,10 @@ final class CastController {
         guard device != nil else { return }
         let wasPlaying = remotePlaying
         let position = self.position
+        // Without the Cast connection (this Mac slept) the YouTube app can't be closed: it pauses.
+        endYouTubeApp(pausingTV: connection == nil)
+        viaYouTubeApp = false
+        handOver = nil
         if let sessionId { send(Namespace.receiver, ["type": "STOP", "sessionId": sessionId], to: "receiver-0") }
         if let transportId { send(Namespace.connection, ["type": "CLOSE"], to: transportId) }
         heartbeat?.invalidate()
@@ -260,7 +282,8 @@ final class CastController {
         switch state {
         case .ready:
             send(Namespace.connection, ["type": "CONNECT"], to: "receiver-0")
-            send(Namespace.receiver, ["type": "LAUNCH", "appId": Self.mediaReceiver], to: "receiver-0")
+            send(Namespace.receiver, ["type": "LAUNCH", "appId": launchedApp], to: "receiver-0")
+            if launchedApp == Lounge.castAppId { startPairingTimeout() }
             heartbeat?.invalidate()
             let timer = Timer(timeInterval: 5, repeats: true) { _ in
                 MainActor.assumeIsolated { _ = CastController.shared.send(Namespace.heartbeat, ["type": "PING"], to: "receiver-0") }
@@ -268,9 +291,10 @@ final class CastController {
             RunLoop.main.add(timer, forMode: .common)
             heartbeat = timer
         case .failed(let error):
-            fail(error.localizedDescription)
+            if viaYouTubeApp { castChannelLost() } else { fail(error.localizedDescription) }
         case .cancelled:
-            if device != nil, self.state != .idle { fail(String(localized: "The connection was closed")) }
+            guard device != nil, self.state != .idle else { break }
+            if viaYouTubeApp { castChannelLost() } else { fail(String(localized: "The connection was closed")) }
         default:
             break
         }
@@ -295,6 +319,7 @@ final class CastController {
     /// `soundOnly`: its sound even if it's a music video (the video didn't play).
     func load(_ track: Track, at position: TimeInterval, autoplay: Bool, soundOnly: Bool = false) {
         let position = position.isFinite ? max(0, position) : 0
+        if viaYouTubeApp { loadOnTV(track, at: position, autoplay: autoplay); return }
         // Already queued on the device (a skip to the next song, or its end): it moves on to it,
         // sooner than a new load.
         if !soundOnly, autoplay, position < 1, jumpToQueued(track) { return }
@@ -419,6 +444,7 @@ final class CastController {
     /// The song to play after this one on the device (nil for none: the end of the queue, Repeat
     /// One). The player calls this whenever its next song may have changed.
     func setNext(_ track: Track?) {
+        if viaYouTubeApp { tvSetNext(track); return }
         guard isActive, let track else {
             nextGeneration += 1
             if wantedNext != nil {
@@ -572,18 +598,24 @@ final class CastController {
         if !playing { remoteBuffering = false }
         pendingPlaying = playing
         pendingSince = Date()
-        pendingPlayingSent = mediaCommand(playing ? "PLAY" : "PAUSE") != nil
+        pendingPlayingSent = viaYouTubeApp ? tvCommand(playing ? .play : .pause) : mediaCommand(playing ? "PLAY" : "PAUSE") != nil
         PlayerController.shared.castStatusChanged()
     }
 
     func seek(to seconds: TimeInterval) {
         remoteTime = seconds
         remoteTimeAt = Date()
-        pendingSeek = mediaCommand("SEEK", ["currentTime": seconds]) != nil ? nil : seconds
+        let sent = viaYouTubeApp ? tvCommand(.seek(seconds)) : mediaCommand("SEEK", ["currentTime": seconds]) != nil
+        pendingSeek = sent ? nil : seconds
     }
 
     /// The receiver's own volume (0…1), like the TV's.
     func setVolume(_ level: Double, muted: Bool) {
+        // The device's volume needs the Cast connection; without it, the YouTube app's own.
+        if viaYouTubeApp, connection == nil {
+            _ = tvCommand(.setVolume(muted ? 0 : Int((min(1, max(0, level)) * 100).rounded())))
+            return
+        }
         send(Namespace.receiver, ["type": "SET_VOLUME", "volume": ["level": min(1, max(0, level)), "muted": muted]], to: "receiver-0")
     }
 
@@ -644,6 +676,8 @@ final class CastController {
     private func handle(_ message: CastMessage) {
         guard let json = (try? JSONSerialization.jsonObject(with: Data(message.payload.utf8))) as? [String: Any],
               let type = json["type"] as? String else { return }
+        // The YouTube app reports through the lounge (its media messages aren't for the media receiver's bookkeeping).
+        if message.namespace == Namespace.media, launchedApp != Self.mediaReceiver { return }
         #if DEBUG
         if message.namespace == Namespace.media { castLog.debug("media: \(message.payload.prefix(1500), privacy: .public)") }
         #endif
@@ -683,11 +717,15 @@ final class CastController {
                 insertedContentId = nil
             }
             if let id, id == jumpRequestId { jumpFailed() }
+        case (Lounge.mdxNamespace, "mdxSessionStatus"):
+            if let screenId = Lounge.screenId(inMdxMessage: json) { pair(with: screenId) }
         case (Namespace.receiver, "LAUNCH_ERROR"):
+            if launchedApp == Lounge.castAppId, !viaYouTubeApp { playFromThisMacInstead("it didn't launch"); return }
             fail(type)
         case (Namespace.connection, "CLOSE") where message.sourceId == transportId || message.sourceId == "receiver-0":
-            // Someone else took over the device (or it went to sleep).
-            if state == .connected { disconnect(resumeLocally: true) }
+            // Someone else took over the device (or it went to sleep). The YouTube app plays on
+            // without the connection; the lounge says if it closes.
+            if viaYouTubeApp { castChannelLost() } else if state == .connected { disconnect(resumeLocally: true) }
         default:
             break
         }
@@ -708,13 +746,19 @@ final class CastController {
     }
 
     #if DEBUG
+    /// For `ytmusicfast debug-cast drop-channel`.
+    func debugDropCastChannel() {
+        if viaYouTubeApp { castChannelLost() }
+    }
+
     /// For `ytmusicfast debug-cast`.
     var debugState: [String: Any] {
         ["device": device?.name ?? "", "state": "\(state)", "videoId": loadedVideoId ?? "", "asVideo": loadedAsVideo,
          "videoRefused": videoRefused, "playing": remotePlaying, "buffering": remoteBuffering, "settling": settling,
          "position": (position * 10).rounded() / 10, "session": mediaSessionId ?? -1,
          "lyrics": loadedWithLyrics ? (lyricsShown ? "on" : "off") : "none", "nextVideoId": wantedNext?.track.videoId ?? "",
-         "currentItem": currentItemId ?? -1, "items": deviceItems.map { "\($0.id):\(CastQueueSync.videoId(fromContentId: $0.contentId) ?? "?")" }]
+         "currentItem": currentItemId ?? -1, "items": deviceItems.map { "\($0.id):\(CastQueueSync.videoId(fromContentId: $0.contentId) ?? "?")" },
+         "viaYouTubeApp": viaYouTubeApp, "castChannel": connection != nil, "sentToTV": sentVideoIds.count]
     }
     #endif
 
@@ -724,7 +768,7 @@ final class CastController {
             PlayerController.shared.castVolumeChanged(level)
         }
         let apps = status?["applications"] as? [[String: Any]] ?? []
-        guard let app = apps.first(where: { $0["appId"] as? String == Self.mediaReceiver }),
+        guard let app = apps.first(where: { $0["appId"] as? String == launchedApp }),
               let transport = app["transportId"] as? String else {
             // Our receiver isn't running any more (closed from the TV's remote, or the TV moved on).
             if transportId != nil, state == .connected { disconnect(resumeLocally: true) }
@@ -734,13 +778,18 @@ final class CastController {
         guard transport != transportId else { return }
         transportId = transport
         send(Namespace.connection, ["type": "CONNECT"], to: transport)
+        if launchedApp == Lounge.castAppId {
+            // The YouTube app: its screen id pairs a remote session (see `pair`).
+            if !viaYouTubeApp { send(Lounge.mdxNamespace, ["type": "getMdxSessionStatus"], to: transport) }
+            return
+        }
         let starting = state != .connected
         state = .connected
         if starting {
             if awake == nil {
                 awake = ProcessInfo.processInfo.beginActivity(options: .idleSystemSleepDisabled, reason: "Casting to \(device?.name ?? "a Cast device")")
             }
-            PlayerController.shared.castingStarted()
+            if !resumeHandOver() { PlayerController.shared.castingStarted() }
         }
         onReady?()
         onReady = nil
@@ -880,5 +929,331 @@ final class CastController {
         remoteTime = status["currentTime"] as? Double ?? 0
         remoteTimeAt = Date()
         PlayerController.shared.castAdvanced(to: next.track.videoId)
+    }
+
+    // MARK: The TV's own YouTube app
+
+    /// The Connect panel's switch changed for a device. Playing on it now, the other app takes
+    /// over in place, from where the song is.
+    func youTubeAppSettingChanged(for device: CastDevice) {
+        guard self.device?.id == device.id, state == .connected || state == .connecting else { return }
+        let wanted = TVYouTubeApp.shared.isOn(for: device) ? Lounge.castAppId : Self.mediaReceiver
+        guard wanted != launchedApp else { return }
+        guard connection != nil else {
+            // The Cast connection went while this Mac slept: connect again.
+            disconnect(resumeLocally: false)
+            cast(to: device)
+            return
+        }
+        castLog.notice("switching to \(wanted == Lounge.castAppId ? "the TV's YouTube app" : "the media receiver", privacy: .public)")
+        if state == .connected, PlayerController.shared.current != nil { handOver = (position, remotePlaying) }
+        endYouTubeApp(pausingTV: false)
+        viaYouTubeApp = false
+        if let sessionId { send(Namespace.receiver, ["type": "STOP", "sessionId": sessionId], to: "receiver-0") }
+        if let transportId { send(Namespace.connection, ["type": "CLOSE"], to: transportId) }
+        sessionId = nil
+        transportId = nil
+        mediaSessionId = nil
+        staleSessionIds = []
+        resetQueue()
+        wantedNext = nil
+        nextGeneration += 1
+        loadGeneration += 1
+        settling = false
+        if wanted == Lounge.castAppId {
+            CastMediaServer.shared.stop()
+            if let awake { ProcessInfo.processInfo.endActivity(awake) }
+            awake = nil
+        }
+        launchedApp = wanted
+        state = .connecting
+        send(Namespace.receiver, ["type": "LAUNCH", "appId": wanted], to: "receiver-0")
+        if wanted == Lounge.castAppId { startPairingTimeout() }
+    }
+
+    /// Carries on from where the app before left off (see `youTubeAppSettingChanged`).
+    private func resumeHandOver() -> Bool {
+        guard let handOver else { return false }
+        self.handOver = nil
+        if let track = PlayerController.shared.current { load(track, at: handOver.position, autoplay: handOver.playing) }
+        PlayerController.shared.castStatusChanged()
+        return true
+    }
+
+    /// The YouTube app has a while to start and pair; then this Mac plays to the TV instead.
+    private func startPairingTimeout() {
+        pairingTimeout?.cancel()
+        pairingTimeout = Task {
+            try? await Task.sleep(for: .seconds(20))
+            guard !Task.isCancelled else { return }
+            playFromThisMacInstead("no answer")
+        }
+    }
+
+    /// The YouTube app told its screen id: a remote session with it, as a phone's.
+    private func pair(with screenId: String) {
+        guard launchedApp == Lounge.castAppId, lounge == nil, device != nil else { return }
+        castLog.notice("TV's YouTube app: pairing")
+        let lounge = YouTubeLounge(screenId: screenId) { event in
+            Task { @MainActor in CastController.shared.tvEvent(event) }
+        }
+        self.lounge = lounge
+        Task {
+            do {
+                try await lounge.connect()
+            } catch {
+                guard self.lounge === lounge else { return }
+                playFromThisMacInstead("pairing failed (\(error))")
+                return
+            }
+            guard self.lounge === lounge, device != nil else { await lounge.close(); return }
+            pairingTimeout?.cancel()
+            pairingTimeout = nil
+            // The TV's own "up next" after the songs sent would play what the queue here doesn't have.
+            await lounge.send(.setAutoplay(false))
+            guard self.lounge === lounge, device != nil else { return }
+            castLog.notice("TV's YouTube app: paired")
+            viaYouTubeApp = true
+            state = .connected
+            // Nothing keeps this Mac awake: the TV plays on without it.
+            if let awake { ProcessInfo.processInfo.endActivity(awake) }
+            awake = nil
+            if !resumeHandOver() { PlayerController.shared.castingStarted() }
+        }
+    }
+
+    /// The YouTube app didn't start or pair: Google's media receiver plays from this Mac instead.
+    private func playFromThisMacInstead(_ reason: String) {
+        guard device != nil, connection != nil, launchedApp == Lounge.castAppId, !viaYouTubeApp else { return }
+        castLog.error("TV's YouTube app: \(reason, privacy: .public); casting from this Mac instead")
+        endYouTubeApp(pausingTV: false)
+        if let sessionId { send(Namespace.receiver, ["type": "STOP", "sessionId": sessionId], to: "receiver-0") }
+        if let transportId { send(Namespace.connection, ["type": "CLOSE"], to: transportId) }
+        sessionId = nil
+        transportId = nil
+        launchedApp = Self.mediaReceiver
+        Router.shared.showToast(String(localized: "The TV's YouTube app didn't answer: playing from this Mac"), icon: "exclamationmark.triangle.fill")
+        send(Namespace.receiver, ["type": "LAUNCH", "appId": Self.mediaReceiver], to: "receiver-0")
+    }
+
+    /// Ends the remote session (the TV plays on unless paused here).
+    private func endYouTubeApp(pausingTV: Bool) {
+        pairingTimeout?.cancel()
+        pairingTimeout = nil
+        if let lounge {
+            let previous = tvSending
+            Task {
+                await previous?.value
+                if pausingTV { await lounge.send(.pause) }
+                await lounge.close()
+            }
+        }
+        lounge = nil
+        tvSending = nil
+        sentVideoIds = []
+        tvVideoId = nil
+        tvWantedNext = nil
+    }
+
+    /// The Cast connection went while the YouTube app plays (this Mac slept, or the TV dropped
+    /// it): the app plays on, and commands go to it directly.
+    private func castChannelLost() {
+        guard connection != nil else { return }
+        castLog.notice("TV's YouTube app: Cast connection gone, carrying on without it")
+        heartbeat?.invalidate()
+        heartbeat = nil
+        let old = connection
+        connection = nil
+        old?.cancel()
+        transportId = nil
+        sessionId = nil
+    }
+
+    /// Sends a command to the TV after the ones before; false while the TV is still starting the
+    /// song (it goes once it has).
+    private func tvCommand(_ command: Lounge.Command) -> Bool {
+        guard lounge != nil, !settling else { return false }
+        sendToTV(command)
+        return true
+    }
+
+    private func sendToTV(_ command: Lounge.Command) {
+        guard let lounge else { return }
+        let previous = tvSending
+        tvSending = Task {
+            await previous?.value
+            if !(await lounge.send(command)) { castLog.error("TV's YouTube app: \(command.name, privacy: .public) didn't go through") }
+        }
+    }
+
+    /// Plays a song on the TV's YouTube app, with the queue's next songs after it: the TV goes on
+    /// by itself while this Mac sleeps, and the queue here follows when it hears (`tvMovedOn`).
+    private func loadOnTV(_ track: Track, at position: TimeInterval, autoplay: Bool) {
+        let before = loadedVideoId, wasPlaying = !settling
+        loadGeneration += 1
+        let generation = loadGeneration
+        loadedVideoId = track.videoId
+        loadedTrack = track
+        remoteTime = position
+        remoteTimeAt = Date()
+        remoteBuffering = true
+        remotePlaying = autoplay
+        // Starting paused: the pause goes once the TV has the song.
+        pendingPlaying = autoplay ? nil : false
+        pendingPlayingSent = false
+        pendingSince = Date()
+        pendingSeek = nil
+        settling = true
+        settlingSince = Date()
+        guard !track.isLocal else {
+            // A file on this Mac: the TV's YouTube app can't have it.
+            Router.shared.showToast(String(localized: "Files on this Mac can't play on the TV's YouTube app"), icon: "exclamationmark.triangle.fill")
+            DispatchQueue.main.async { PlayerController.shared.castFinishedSong(track.videoId) }
+            return
+        }
+        let player = PlayerController.shared
+        let upcoming = player.repeatMode == .one ? [] : player.upNext.prefix(50).prefix { !$0.track.isLocal }.map(\.track.videoId)
+        // The TV's next one (`tvSetNext` keeps it the queue's): the TV skips to it itself, sooner.
+        if autoplay, position < 1, wasPlaying, let at = sentVideoIds.firstIndex(where: { $0 == before }), sentVideoIds.indices.contains(at + 1),
+           sentVideoIds[at + 1] == track.videoId {
+            castLog.notice("TV's YouTube app: next, to \(track.videoId, privacy: .public)")
+            sendToTV(.next)
+            return
+        }
+        Task {
+            // Skipping through songs quickly: only the one stopped on goes to the TV.
+            try? await Task.sleep(for: .milliseconds(150))
+            guard generation == loadGeneration, lounge != nil else { return }
+            sentVideoIds = [track.videoId] + upcoming
+            castLog.notice("TV's YouTube app: play \(track.videoId, privacy: .public) at \(position) (\(upcoming.count) after it)")
+            sendToTV(.setPlaylist(videoIds: sentVideoIds, index: 0, time: position))
+        }
+    }
+
+    /// The queue's next song changed (matched to the Song/Video switch, or the queue was edited):
+    /// it goes after the song playing in the TV's list, so the TV goes on to it.
+    private func tvSetNext(_ track: Track?) {
+        tvWantedNext = track
+        guard let track, !track.isLocal, !settling, let at = sentVideoIds.firstIndex(where: { $0 == loadedVideoId }) else { return }
+        tvWantedNext = nil
+        let old = sentVideoIds.indices.contains(at + 1) ? sentVideoIds[at + 1] : nil
+        guard old != track.videoId else { return }
+        // The one it replaces goes, unless it's still to come (something was put before it).
+        if let old, !PlayerController.shared.upNext.dropFirst().contains(where: { $0.track.videoId == old }) {
+            sendToTV(.removeVideo(old))
+            sentVideoIds.remove(at: at + 1)
+        }
+        castLog.notice("TV's YouTube app: next is \(track.videoId, privacy: .public)")
+        sendToTV(.insertVideo(track.videoId))
+        sentVideoIds.insert(track.videoId, at: at + 1)
+    }
+
+    private func tvEvent(_ event: Lounge.Event) {
+        guard viaYouTubeApp, isActive else { return }
+        switch event.name {
+        case "nowPlaying", "onStateChange":
+            if let playback = Lounge.Playback(event) { tvPlayback(playback) }
+        case "loungeScreenDisconnected":
+            // The YouTube app closed on the TV.
+            castLog.notice("TV's YouTube app: closed on the TV")
+            disconnect(resumeLocally: true)
+        default:
+            castLog.debug("TV's YouTube app: \(event.name, privacy: .public)")
+        }
+    }
+
+    /// The TV's player, mapped to what the player bar shows, as `mediaStatus` does for the media
+    /// receiver: a load shows until the TV plays it, and play/pause asked for here aren't undone by
+    /// the TV's older reports.
+    private func tvPlayback(_ playback: Lounge.Playback) {
+        if let video = playback.videoId { tvVideoId = video }
+        castLog.debug("TV: \(self.tvVideoId ?? "-", privacy: .public) \(String(describing: playback.state), privacy: .public) at \(playback.currentTime ?? -1)")
+        if settling {
+            // An ad before the song: it plays when that's over.
+            if playback.state == .advertisement { settlingSince = Date() }
+            let started = tvVideoId == loadedVideoId && (playback.state == .playing || playback.state == .paused)
+            guard started else {
+                if Date().timeIntervalSince(settlingSince) > 20 {
+                    // The TV didn't play it (not available there): the next song.
+                    castLog.notice("TV's YouTube app didn't play \(self.loadedVideoId ?? "-", privacy: .public): next song")
+                    settling = false
+                    PlayerController.shared.castFinishedSong(loadedVideoId)
+                    return
+                }
+                remoteBuffering = true
+                PlayerController.shared.castStatusChanged()
+                return
+            }
+            settling = false
+            // What was asked for before the TV had the song.
+            if let pendingPlaying, !pendingPlayingSent { pendingPlayingSent = tvCommand(pendingPlaying ? .play : .pause) }
+            if let pendingSeek, tvCommand(.seek(pendingSeek)) { self.pendingSeek = nil }
+            if let tvWantedNext { tvSetNext(tvWantedNext) }
+        } else if let video = tvVideoId, video != loadedVideoId {
+            tvMovedOn(to: video, playback)
+            return
+        }
+        guard let state = playback.state else { return }
+        let reportedPlaying: Bool
+        switch state {
+        case .playing, .buffering, .unstarted, .advertisement: reportedPlaying = true
+        case .paused, .cued, .ended: reportedPlaying = false
+        case .unknown: return
+        }
+        let waiting = pendingPlaying.map { $0 != reportedPlaying && Date().timeIntervalSince(pendingSince) < 4 } ?? false
+        if !waiting {
+            pendingPlaying = nil
+            remotePlaying = reportedPlaying
+            if pendingSeek == nil, let time = playback.currentTime {
+                remoteTime = time
+                remoteTimeAt = Date()
+            }
+        }
+        remoteBuffering = state == .buffering || state == .unstarted || state == .advertisement
+        if state == .ended { tvFinishedSong() }
+        PlayerController.shared.castStatusChanged()
+    }
+
+    /// The song ended on the TV. With the queue's next song after it there, the TV goes on by
+    /// itself (should it not, the player does); otherwise the player loads the next.
+    private func tvFinishedSong() {
+        let finished = loadedVideoId
+        let upNext = PlayerController.shared.upNext.map(\.track.videoId)
+        guard let at = sentVideoIds.firstIndex(where: { $0 == finished }), sentVideoIds.indices.contains(at + 1),
+              Lounge.songsAhead(to: sentVideoIds[at + 1], sent: Array(sentVideoIds[at...]), upNext: upNext) == 1 else {
+            PlayerController.shared.castFinishedSong(finished)
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            MainActor.assumeIsolated {
+                let cast = CastController.shared
+                guard cast.isActive, cast.viaYouTubeApp, cast.loadedVideoId == finished, !cast.settling else { return }
+                PlayerController.shared.castFinishedSong(finished)
+            }
+        }
+    }
+
+    /// The TV went on to another video by itself: its list ran on (this Mac may have slept through
+    /// a few songs), and the queue here follows. Anything else (picked on the TV) gives way to the
+    /// queue's next song.
+    private func tvMovedOn(to video: String, _ playback: Lounge.Playback) {
+        let player = PlayerController.shared
+        guard let at = sentVideoIds.firstIndex(where: { $0 == loadedVideoId }),
+              let ahead = Lounge.songsAhead(to: video, sent: Array(sentVideoIds[at...]), upNext: player.upNext.map(\.track.videoId)) else {
+            castLog.notice("TV's YouTube app went to \(video, privacy: .public), not next here: playing the next song")
+            player.castFinishedSong(loadedVideoId)
+            return
+        }
+        castLog.notice("TV's YouTube app went on \(ahead) to \(video, privacy: .public)")
+        loadGeneration += 1
+        for id in sentVideoIds[(at + 1)...(at + ahead)] {
+            loadedVideoId = id
+            player.castAdvanced(to: id)
+        }
+        loadedTrack = player.current
+        loadedVideoId = video
+        remoteTime = playback.currentTime ?? 0
+        remoteTimeAt = Date()
+        tvPlayback(playback)
     }
 }

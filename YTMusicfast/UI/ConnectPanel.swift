@@ -15,7 +15,9 @@ struct ConnectPanel: View {
     /// What's playing the music right now.
     private var current: (name: String, kind: String, symbol: String) {
         if let device = cast.device {
-            return (device.name, cast.state == .connecting ? String(localized: "Connecting…") : String(localized: "Google Cast"), device.symbol)
+            let kind = cast.state == .connecting ? String(localized: "Connecting…")
+                : cast.viaYouTubeApp ? String(localized: "Google Cast · YouTube app") : String(localized: "Google Cast")
+            return (device.name, kind, device.symbol)
         }
         if player.isAirPlaying { return (String(localized: "AirPlay"), String(localized: "AirPlay"), "airplayaudio") }
         let uid = player.outputDeviceUID ?? defaultUID
@@ -42,7 +44,11 @@ struct ConnectPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     currentCard
-                        .padding(.bottom, 18)
+                        .padding(.bottom, cast.device?.isSpeaker == false ? 4 : 18)
+                    if let device = cast.device, !device.isSpeaker {
+                        YouTubeAppSwitch(device: device)
+                            .padding(.bottom, 14)
+                    }
                     let casting = cast.device != nil
                     if player.outputDeviceUID != nil || player.isAirPlaying || casting {
                         // Back to whatever macOS is set to.
@@ -82,8 +88,15 @@ struct ConnectPanel: View {
                         .accessibilityElement(children: .combine)
                     }
                     ForEach(cast.devices.filter { $0.id != cast.device?.id }) { device in
-                        DeviceRow(name: device.name, subtitle: String(localized: "Google Cast"), symbol: device.symbol) {
+                        let youTubeApp = TVYouTubeApp.shared.isOn(for: device)
+                        DeviceRow(name: device.name, subtitle: youTubeApp ? String(localized: "Google Cast · YouTube app") : String(localized: "Google Cast"),
+                                  symbol: device.symbol) {
                             cast.cast(to: device)
+                        }
+                        .contextMenu {
+                            if !device.isSpeaker {
+                                Toggle("Play on the TV's YouTube app", isOn: Binding(get: { youTubeApp }, set: { TVYouTubeApp.shared.set($0, for: device) }))
+                            }
                         }
                     }
                     AirPlayRow()
@@ -143,6 +156,29 @@ struct ConnectPanel: View {
     private func reload() {
         devices = OutputDevices.all()
         defaultUID = OutputDevices.defaultDeviceUID()
+    }
+}
+
+/// Whether a TV plays through its own YouTube app (see `TVYouTubeApp`), under the TV playing now.
+private struct YouTubeAppSwitch: View {
+    var device: CastDevice
+
+    var body: some View {
+        Toggle(isOn: Binding(get: { TVYouTubeApp.shared.isOn(for: device) }, set: { TVYouTubeApp.shared.set($0, for: device) })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Play on the TV's YouTube app").font(.system(size: 13, weight: .semibold))
+                Text("This Mac can sleep while it plays; the TV shows YouTube's own screen.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .tint(Theme.accent)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 }
 

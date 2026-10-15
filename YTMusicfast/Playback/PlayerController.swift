@@ -1497,7 +1497,8 @@ final class PlayerController {
                 entry = Self.entry(entry, as: other, video: VideoController.shared.videoMode)
                 queue[at] = entry
             }
-            await CastMediaServer.shared.prepare(entry.track)
+            // The TV's YouTube app fetches songs itself.
+            if !CastController.shared.viaYouTubeApp { await CastMediaServer.shared.prepare(entry.track) }
             guard !Task.isCancelled, CastController.shared.isActive else { return }
             CastController.shared.setNext(entry.track)
         }
@@ -1690,8 +1691,9 @@ final class PlayerController {
         guard cast.isActive else { return }
         let position = cast.position
         tick(CMTime(seconds: position, preferredTimescale: 600))
-        // Some receivers report a longer length than the song has: move on at its real end.
-        if duration > 0, position >= duration + 1, cast.remotePlaying { castFinishedSong(current?.videoId) }
+        // Some receivers report a longer length than the song has: move on at its real end. (The
+        // TV's YouTube app says when its video ends, and goes on by itself.)
+        if duration > 0, position >= duration + 1, cast.remotePlaying, !cast.viaYouTubeApp { castFinishedSong(current?.videoId) }
     }
 
     // MARK: Internals

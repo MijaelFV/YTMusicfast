@@ -147,11 +147,19 @@ enum CommandServer {
             default: return fail("Unknown setting: \(rest[0])")
             }
         case "debug-cast":
-            // Casting from scripts: `debug-cast <device name>`, `debug-cast off`, `debug-cast status`.
+            // Casting from scripts: `debug-cast <device name>`, `debug-cast off`, `debug-cast status`,
+            // `debug-cast youtube-app on|off` (the device playing now goes through its YouTube app).
             let cast = CastController.shared
             switch rest.joined(separator: " ") {
             case "", "status": break
             case "off": cast.disconnect()
+            case "drop-channel":
+                // As when this Mac sleeps: the Cast connection goes; the TV's YouTube app plays on.
+                cast.debugDropCastChannel()
+            case "youtube-app on", "youtube-app off":
+                guard let device = cast.device else { return fail("Not casting") }
+                TVYouTubeApp.shared.set(rest.last == "on", for: device)
+                for _ in 0..<80 where !cast.isActive || cast.viaYouTubeApp != (rest.last == "on") { try? await Task.sleep(for: .milliseconds(250)) }
             case let name:
                 cast.startDiscovery()
                 defer { cast.stopDiscovery() }
@@ -160,7 +168,8 @@ enum CommandServer {
                     return fail("No Cast device named \(name) (found: \(cast.devices.map(\.name).joined(separator: ", ")))")
                 }
                 cast.cast(to: device)
-                for _ in 0..<30 where !cast.isActive { try? await Task.sleep(for: .milliseconds(250)) }
+                // The TV's YouTube app takes longer to start and pair.
+                for _ in 0..<80 where !cast.isActive { try? await Task.sleep(for: .milliseconds(250)) }
             }
             let data = (try? JSONSerialization.data(withJSONObject: cast.debugState, options: [.sortedKeys])) ?? Data()
             return ok(String(decoding: data, as: UTF8.self))

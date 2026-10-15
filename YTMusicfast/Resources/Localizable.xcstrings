@@ -8493,6 +8493,56 @@
           }
         }
       }
+    },
+    "Play on the TV's YouTube app": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reproducir en la app de YouTube de la TV"
+          }
+        }
+      }
+    },
+    "This Mac can sleep while it plays; the TV shows YouTube's own screen.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta Mac puede entrar en reposo mientras suena; la TV muestra la pantalla de YouTube."
+          }
+        }
+      }
+    },
+    "Google Cast · YouTube app": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google Cast · app de YouTube"
+          }
+        }
+      }
+    },
+    "The TV's YouTube app didn't answer: playing from this Mac": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La app de YouTube de la TV no respondió: se reproduce desde esta Mac"
+          }
+        }
+      }
+    },
+    "Files on this Mac can't play on the TV's YouTube app": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los archivos de esta Mac no se pueden reproducir en la app de YouTube de la TV"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
