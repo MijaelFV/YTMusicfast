@@ -63,6 +63,9 @@ final class ChunkedAudioSource: NSObject, AVAssetResourceLoaderDelegate, HLSSour
     private var refreshesWithoutProgress = 0
     private var completed = false
     private var cancelled = false
+    /// Players waiting for a song's repackaged file (see `finishedFile`).
+    private var fileWaiters: [UUID: CheckedContinuation<URL?, Never>] = [:]
+    private let created = Date()
 
     private static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
@@ -123,6 +126,7 @@ final class ChunkedAudioSource: NSObject, AVAssetResourceLoaderDelegate, HLSSour
         if !fetchesWholeFile, await loadIndex(), let url = try? await HLSServer.shared.playlistURL(for: self) {
             return AVURLAsset(url: url)
         }
+        if let file = await finishedFile() { return AVURLAsset(url: file) }
         let asset = AVURLAsset(url: URL(string: "\(Self.scheme)://\(videoId).m4a")!)
         asset.resourceLoader.setDelegate(self, queue: queue)
         return asset
@@ -151,6 +155,37 @@ final class ChunkedAudioSource: NSObject, AVAssetResourceLoaderDelegate, HLSSour
         return false
     }
 
+    /// An Opus song plays from its repackaged file in the replay cache, once that's written:
+    /// whatever reaches AVFoundation through the resource loader stays in its memory (the whole
+    /// song, and again for the next one queued), while a file is read from disk as needed. The
+    /// player can't start before the whole song is in either way. Nil when there's no such file
+    /// (not an Opus song, it fell back to AAC or memory, it failed, or it was skipped past): the
+    /// resource loader serves it then.
+    private func finishedFile() async -> URL? {
+        let id = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                queue.async {
+                    guard self.opus != nil, !self.cancelled else { continuation.resume(returning: nil); return }
+                    if let converted = self.converted {
+                        guard case .file = converted else { continuation.resume(returning: nil); return }
+                        continuation.resume(returning: AudioCache.replayCacheFile(for: self.videoId))
+                        return
+                    }
+                    self.fileWaiters[id] = continuation
+                    self.pump(from: nil)
+                }
+            }
+        } onCancel: {
+            queue.async { self.fileWaiters.removeValue(forKey: id)?.resume(returning: nil) }
+        }
+    }
+
+    private func resumeFileWaiters(with file: URL?) {
+        fileWaiters.values.forEach { $0.resume(returning: file) }
+        fileWaiters = [:]
+    }
+
     /// Starts downloading the whole track in the background (used for the up-next track).
     func prefetch() {
         queue.async { self.pump(from: 0) }
@@ -167,6 +202,7 @@ final class ChunkedAudioSource: NSObject, AVAssetResourceLoaderDelegate, HLSSour
             self.cancelled = true
             self.waiters.forEach { $0.continuation.resume(returning: nil) }
             self.waiters = []
+            self.resumeFileWaiters(with: nil)
             self.onRelease?()
             self.onRelease = nil
             self.tasks.values.forEach { $0.cancel() }
@@ -433,6 +469,7 @@ final class ChunkedAudioSource: NSObject, AVAssetResourceLoaderDelegate, HLSSour
         requests.removeAll()
         waiters.forEach { $0.continuation.resume(returning: nil) }
         waiters = []
+        resumeFileWaiters(with: nil)
     }
 
     /// Every chunk is in: the file becomes the replay cache (moved, not copied; reading from the
@@ -444,6 +481,7 @@ final class ChunkedAudioSource: NSObject, AVAssetResourceLoaderDelegate, HLSSour
             return
         }
         completed = true
+        perfLog.notice("downloaded \(self.videoId, privacy: .public) \(self.length) bytes in \(Int(Date().timeIntervalSince(self.created) * 1000)) ms")
         if inMemory.isEmpty, let partFile {
             try? partFile.synchronize()
             AudioCache.adopt(partURL, videoId: videoId)
@@ -475,16 +513,19 @@ final class ChunkedAudioSource: NSObject, AVAssetResourceLoaderDelegate, HLSSour
             return
         }
         completed = true
+        perfLog.notice("downloaded \(self.videoId, privacy: .public) \(self.length) bytes (Opus) in \(Int(Date().timeIntervalSince(self.created) * 1000)) ms")
         let output = AudioCache.partialDirectory.appendingPathComponent("\(videoId)-\(UUID().uuidString).m4a")
         do {
             try WebMOpus.write(layout, from: webm, to: output)
             converted = .file(try FileHandle(forReadingFrom: output), length: layout.length)
             // Reading from the open handle goes on working after the move.
             AudioCache.adopt(output, videoId: videoId)
+            resumeFileWaiters(with: AudioCache.replayCacheFile(for: videoId))
         } catch {
             // Full disk: keep it in memory for this play (a song is a few MB).
             try? FileManager.default.removeItem(at: output)
             converted = .memory(WebMOpus.data(layout, from: webm))
+            resumeFileWaiters(with: nil)
         }
         try? partFile?.close()
         partFile = nil
@@ -498,6 +539,7 @@ final class ChunkedAudioSource: NSObject, AVAssetResourceLoaderDelegate, HLSSour
     /// player's requests are still waiting, so it just takes a moment longer.
     private func fallBackToAAC() {
         opus = nil
+        resumeFileWaiters(with: nil)
         generation += 1
         refreshesWithoutProgress = 0
         tasks.values.forEach { $0.cancel() }

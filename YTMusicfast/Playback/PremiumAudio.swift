@@ -295,6 +295,9 @@ actor PremiumAudio {
     private func releaseSolver() {
         if let context = solver?.context { JSGarbageCollect(context.jsGlobalContextRef) }
         solver = nil
+        // Freed memory still counts against the app until malloc gives the pages back, which it
+        // otherwise does only under memory pressure; the solver alone is tens of MB.
+        malloc_zone_pressure_relief(nil, 0)
     }
 
     /// Each solver runs in its own JavaScript machine, so letting it go returns all of its memory.

@@ -200,6 +200,9 @@ final class PlayerController {
     @ObservationIgnored private var loadStartsPaused = false
     /// When the last song change began, to tell a burst of skips from a single one.
     @ObservationIgnored private var lastStart = Date.distantPast
+    /// When the song now loading was asked for, until its sound starts (logged for timing).
+    @ObservationIgnored private var soundAsked: (videoId: String, at: Date)?
+    @ObservationIgnored private var soundObserver: Any?
     @ObservationIgnored private var enqueueTask: Task<Void, Never>?
     @ObservationIgnored private var observers: [NSKeyValueObservation] = []
     @ObservationIgnored private var timeObserver: Any?
@@ -1685,6 +1688,8 @@ final class PlayerController {
 
         guard let index = currentIndex, queue.indices.contains(index) else { return }
         let entry = queue[index]
+        soundAsked = (entry.track.videoId, Date())
+        perfLog.notice("play \(entry.track.videoId, privacy: .public)")
         // A Song/Video switch for the song before has nothing left to switch.
         if let versionEntry, versionEntry != entry.id { cancelVersionSwitch() }
         // Skipping through songs quickly: only the one you stop on loads, and the downloads of
@@ -1702,6 +1707,7 @@ final class PlayerController {
         }
         // Casting: the device plays it (from this Mac's media server); nothing loads here.
         if CastController.shared.isActive {
+            soundAsked = nil
             isBuffering = true
             nowPlaying.updateTrack()
             VideoController.shared.trackChanged()
@@ -1768,7 +1774,7 @@ final class PlayerController {
                     guard stillWanted() else { return }
                 }
                 loadingEntry = nil
-                if loadStartsPaused { player.pause() } else { player.play() }
+                if loadStartsPaused { player.pause() } else { player.play(); logWhenSoundStarts() }
                 // The player may already be in that state, and then reports no change.
                 showPlayerState()
                 trackDidChange()
@@ -1779,6 +1785,22 @@ final class PlayerController {
                 guard stillWanted() else { return }
                 loadingEntry = nil
                 handleFailure(error)
+            }
+        }
+    }
+
+    /// Logs (category Perf) when the song asked for has played its first 10 ms.
+    private func logWhenSoundStarts() {
+        guard let asked = soundAsked, asked.videoId == current?.videoId else { return }
+        soundAsked = nil
+        let deck = player
+        if let soundObserver { deck.removeTimeObserver(soundObserver) }
+        let at = CMTimeAdd(deck.currentTime(), CMTime(value: 1, timescale: 100))
+        soundObserver = deck.addBoundaryTimeObserver(forTimes: [NSValue(time: at)], queue: .main) { [weak self, weak deck] in
+            MainActor.assumeIsolated {
+                perfLog.notice("sound \(asked.videoId, privacy: .public) after \(Int(Date().timeIntervalSince(asked.at) * 1000)) ms")
+                if let observer = self?.soundObserver { deck?.removeTimeObserver(observer) }
+                self?.soundObserver = nil
             }
         }
     }
@@ -1806,7 +1828,9 @@ final class PlayerController {
             if let existing = sources[videoId] {
                 source = existing
             } else {
+                let started = Date()
                 let info = try await resolver.resolve(videoId: videoId)
+                perfLog.notice("resolved \(videoId, privacy: .public) in \(Int(Date().timeIntervalSince(started) * 1000)) ms")
                 // Skipped past while it resolved: don't start downloading it.
                 try Task.checkCancellation()
                 source = makeSource(videoId: videoId, info: info)

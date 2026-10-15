@@ -5,7 +5,7 @@
 <h1 align="center">YT Musicfast</h1>
 
 <p align="center"><strong>A fast, native Mac app for YouTube Music.</strong><br>
-SwiftUI + AVFoundation. An 8 MB download, ~150 MB of RAM, 0% CPU when idle.</p>
+SwiftUI + AVFoundation. An 8 MB download, ~120 MB of RAM idle and ~160 MB playing, 0% CPU when idle.</p>
 
 <p align="center">
   <a href="https://github.com/MijaelFV/YTMusicfast/releases/latest"><strong>Download</strong></a> ·
@@ -65,6 +65,7 @@ All of it, plus every keyboard shortcut: [Features](docs/features.md).
 
 - [Features and keyboard shortcuts](docs/features.md)
 - [Privacy](docs/privacy.md): what stays on your Mac and what goes over the network
+- [Performance](docs/performance.md): memory, CPU and start times, measured
 - [Troubleshooting](docs/troubleshooting.md)
 - [Development](docs/development.md): building, tests and architecture
 

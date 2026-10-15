@@ -71,6 +71,7 @@ final class PageModel {
         } else if page == nil, persists, let saved = await DiskCache.load(BrowsePage.self, key: cacheKey), page == nil {
             // Last time's copy, shown at once while a fresh one loads.
             page = saved.value
+            if case .home = source { perfLog.notice("home shown from disk") }
             loadedKey = cacheKey
             Self.cache[cacheKey] = (saved.value, saved.saved)
             Self.cacheOrder.append(cacheKey)
@@ -113,6 +114,7 @@ final class PageModel {
             switch source {
             case .home(let chip):
                 page = try await MusicAPI.home(params: chip)
+                perfLog.notice("home loaded from network")
             case .target(let target):
                 var result = try await MusicAPI.browse(target)
                 // A just-created playlist can take a moment to become visible; retry briefly.

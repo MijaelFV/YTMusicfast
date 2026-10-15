@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static let topBarHeight: CGFloat = 64
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        perfLog.notice("launched")
         Bench.installSlowLogger()
         PhoneRemote.shared.startIfEnabled()
         _ = Updater.shared  // starts Sparkle's daily update check

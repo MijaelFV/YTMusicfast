@@ -1,6 +1,11 @@
 import AppKit
+import os
 import QuartzCore
 import SwiftUI
+
+/// Timing milestones (launch, Home shown, click to sound), read with
+/// `log stream --predicate 'subsystem == "dev.ytmusicfast" AND category == "Perf"'` (see docs/performance.md).
+let perfLog = Logger(subsystem: "dev.ytmusicfast", category: "Perf")
 
 /// Temporary measuring tool. A copy of the app launched with `YTMF_BENCH=1` (and
 /// `YTMF_BENCH_TARGET=<playlist browseId>`) scrolls Home, then that playlist, one step per display

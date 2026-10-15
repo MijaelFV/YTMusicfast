@@ -4,7 +4,7 @@
 
 What YouTube Music on the web doesn't offer:
 
-- **A real Mac app** — native SwiftUI + AVFoundation, ~150 MB of RAM instead of a browser tab, 0% CPU while idle
+- **A real Mac app** — native SwiftUI + AVFoundation, ~120 MB of RAM idle and ~160 MB playing, against ~470 MB for a YouTube Music tab in Safari; 0% CPU while idle
 - **Downloads and offline** — save albums and playlists (including Liked Music); **Offline Mode**; songs you've played
   are kept for instant, data-free replays (500 MB–10 GB); search finds your own music when you're offline
 - **Equalizer and crossfade** — a 10-band **equalizer** with presets, **crossfade** (0–12 s), **balance** and
@@ -78,8 +78,8 @@ What YouTube Music on the web doesn't offer:
 ## Fast and dependable
 
 - **Opens instantly** — Home, Your Library and pages you've visited show last time's copy at once (also offline)
-- **Songs start in about a second**; the next one is ready before the current one ends; skips fade without clicks;
-  skipping through many songs quickly loads only the one you stop on
+- **Songs you've played start in under half a second**, new ones in about two (mostly the download);
+  the next one is ready before the current one ends; skips fade without clicks; skipping through many songs quickly loads only the one you stop on
 - **Keeps playing** — recovers from stalls and dropped connections, uses a lighter stream on slow networks and in
   Low Data Mode, pauses when your headphones disconnect, and picks up where you left off after a restart
 - **Keeps working** when YouTube changes things: a backup client list in [`clients.json`](../clients.json) fixes every
