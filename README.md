@@ -21,7 +21,7 @@ SwiftUI + AVFoundation. An 8 MB download, ~150 MB of RAM, 0% CPU when idle.</p>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F05138" alt="MIT license"></a>
 </p>
 
-![YT Musicfast: Your Library, Home and the Now Playing panel](docs/screenshots/main-window.jpg)
+![YT Musicfast: Home, Now Playing, the player page switching from the song to its music video, and the full-screen player](docs/demo.webp)
 
 <p align="center">
   <img src="docs/screenshots/player-video.jpg" width="32%" alt="The player page playing a music video, with the queue and radio tuning">
