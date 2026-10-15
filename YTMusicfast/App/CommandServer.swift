@@ -136,13 +136,14 @@ enum CommandServer {
             let data = (try? JSONSerialization.data(withJSONObject: player.debugState, options: [.sortedKeys])) ?? Data()
             return ok(String(decoding: data, as: UTF8.self))
         case "debug-set":
-            guard rest.count == 2 else { return fail("debug-set crossfade <seconds> | video on|off | offline on|off | autoplay on|off") }
+            guard rest.count == 2 else { return fail("debug-set crossfade <seconds> | video on|off | offline on|off | autoplay on|off | castlyrics on|off") }
             let on = rest[1] == "on"
             switch rest[0] {
             case "crossfade": player.crossfadeSeconds = Double(rest[1]) ?? 0
             case "video": SongVideoToggle.select(video: on)
             case "offline": player.offlineMode = on
             case "autoplay": player.autoplay = on
+            case "castlyrics": CastController.shared.lyricsOnTV = on
             default: return fail("Unknown setting: \(rest[0])")
             }
         case "debug-cast":

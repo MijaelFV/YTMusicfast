@@ -31,6 +31,7 @@ struct SettingsEntry: Identifiable {
             SettingsEntry(title: String(localized: "Streaming quality"), keywords: "bitrate data saver audio", tab: "general", section: "playback"),
             SettingsEntry(title: String(localized: "Show music videos (video mode)"), keywords: "video", tab: "general", section: "playback"),
             SettingsEntry(title: String(localized: "Skip non-music parts of music videos"), keywords: "sponsorblock intro outro", tab: "general", section: "playback"),
+            SettingsEntry(title: String(localized: "Show lyrics on the TV when casting"), keywords: "chromecast google tv captions subtitles", tab: "general", section: "playback"),
             SettingsEntry(title: String(localized: "Show a notification when the song changes"), keywords: "banner alert", tab: "general", section: "playback"),
             SettingsEntry(title: String(localized: "Balance"), keywords: "left right pan channel", tab: "general", section: "playback"),
             SettingsEntry(title: String(localized: "Mono audio"), keywords: "stereo channel", tab: "general", section: "playback"),

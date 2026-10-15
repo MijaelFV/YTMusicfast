@@ -24,8 +24,9 @@ struct CastDevice: Identifiable, Hashable, Sendable {
 
 /// Google Cast, without Google's SDK (it has none for Mac apps): finds Cast devices with Bonjour,
 /// opens the TLS channel, launches Google's standard media receiver and plays what's playing here
-/// on it. The queue stays in this app; the device just plays one song at a time from
-/// `CastMediaServer`, and its status drives the player bar.
+/// on it. The queue stays in this app: the device holds the song playing and the next one (so it
+/// moves on without a new load, and shows what's up next), both from `CastMediaServer`, and its
+/// status drives the player bar.
 ///
 /// Discovery runs only while the Connect panel is open; nothing runs while not casting.
 @MainActor
@@ -90,6 +91,58 @@ final class CastController {
     /// The latest LOAD's request id: the device echoes it in the status that starts its session,
     /// which tells that session from one of a load a quick skip replaced.
     @ObservationIgnored private var loadRequestId: Int?
+    /// The loaded song's address, and whether it went with its lyrics track (and that's on).
+    @ObservationIgnored private var loadedContentId: String?
+    @ObservationIgnored private var loadedWithLyrics = false
+    @ObservationIgnored private var lyricsShown = false
+
+    // The device's queue (see `CastQueueSync`): its items as last listed, the one playing, and the
+    // next song as the app wants it there.
+    @ObservationIgnored private var deviceItems: [CastQueueSync.Item] = []
+    @ObservationIgnored private var currentItemId: Int?
+    /// Items the device played before the one playing (their late reports are ignored).
+    @ObservationIgnored private var playedItemIds: Set<Int> = []
+    /// Items asked to be taken off, until the device says they're gone (a status sent before it
+    /// got to them still lists them).
+    @ObservationIgnored private var removedItemIds: Set<Int> = []
+    @ObservationIgnored private var wantedNext: QueuedSong?
+    @ObservationIgnored private var nextGeneration = 0
+    /// The next song's item is to be replaced (sent again) even though its address is the same.
+    @ObservationIgnored private var replaceNext = false
+    /// A QUEUE_INSERT on its way: its request id, the address it adds, and when it went.
+    @ObservationIgnored private var insertRequestId: Int?
+    @ObservationIgnored private var insertedContentId: String?
+    @ObservationIgnored private var insertSentAt = Date()
+    /// Skipped to the song queued on the device: the item it's moving to, and the request.
+    @ObservationIgnored private var jumpItemId: Int?
+    @ObservationIgnored private var jumpRequestId: Int?
+
+    /// A song sent to the device's queue, to play after the one playing.
+    private struct QueuedSong {
+        var track: Track
+        var contentId: String
+        /// Asked for as its music video (`castsVideo`) and with its lyrics, and sent as that.
+        var askedVideo: Bool
+        var askedLyrics: Bool
+        var asVideo: Bool
+        var withLyrics: Bool
+        var media: [String: Any]
+    }
+
+    /// Synced lyrics as captions over music videos on a TV (Settings → Playback).
+    var lyricsOnTV = UserDefaults.standard.object(forKey: "castLyrics") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(lyricsOnTV, forKey: "castLyrics")
+            lyricsSettingChanged()
+        }
+    }
+
+    /// Lyrics go to the device: the setting is on and it's a TV.
+    var wantsLyrics: Bool { lyricsOnTV && device?.isSpeaker == false }
+
+    /// A song's lyrics go with it: as captions over its music video (the receiver shows none over
+    /// a song's cover).
+    func wantsLyrics(_ track: Track) -> Bool { wantsLyrics && castsVideo(track) }
 
     private static let senderId = "sender-ytmusicfast"
     private static let mediaReceiver = "CC1AD845"
@@ -190,6 +243,12 @@ final class CastController {
         loadedVideoId = nil
         loadedTrack = nil
         loadedAsVideo = false
+        loadedContentId = nil
+        loadedWithLyrics = false
+        lyricsShown = false
+        resetQueue()
+        wantedNext = nil
+        nextGeneration += 1
         remotePlaying = false
         if let awake { ProcessInfo.processInfo.endActivity(awake) }
         awake = nil
@@ -236,6 +295,9 @@ final class CastController {
     /// `soundOnly`: its sound even if it's a music video (the video didn't play).
     func load(_ track: Track, at position: TimeInterval, autoplay: Bool, soundOnly: Bool = false) {
         let position = position.isFinite ? max(0, position) : 0
+        // Already queued on the device (a skip to the next song, or its end): it moves on to it,
+        // sooner than a new load.
+        if !soundOnly, autoplay, position < 1, jumpToQueued(track) { return }
         // A newer load (quick skips) makes this one stale: only the latest reaches the device.
         loadGeneration += 1
         let generation = loadGeneration
@@ -243,6 +305,9 @@ final class CastController {
         loadedVideoId = track.videoId
         loadedTrack = track
         loadedAsVideo = false
+        loadedContentId = nil
+        loadedWithLyrics = false
+        lyricsShown = false
         videoPlayed = false
         remoteTime = position
         remoteTimeAt = Date()
@@ -257,45 +322,241 @@ final class CastController {
         if staleSessionIds.count > 20 { staleSessionIds = [] }
         if let mediaSessionId { staleSessionIds.insert(mediaSessionId) }
         mediaSessionId = nil
+        // A load replaces the device's queue; the next song goes back on once this one plays.
+        resetQueue()
+        if !soundOnly, wantsLyrics(track) { Task { await lookUpLyrics(track) } }
         let send = { [weak self] in
             guard let self, self.transportId != nil else { return }
             Task {
-                // A music video as HLS; its sound alone when it can't be (see CastVideo).
-                let video = !soundOnly && self.castsVideo(track) ? await CastMediaServer.shared.videoURL(for: track) : nil
+                let made = await self.media(for: track, soundOnly: soundOnly)
                 guard generation == self.loadGeneration else { return }
-                let url: URL
-                if let video {
-                    url = video
-                } else {
-                    guard let sound = try? await CastMediaServer.shared.url(for: track) else {
-                        self.fail(String(localized: "This Mac has no network address"))
-                        return
-                    }
-                    url = sound
+                guard let made else {
+                    self.fail(String(localized: "This Mac has no network address"))
+                    return
                 }
-                guard generation == self.loadGeneration, let transportId = self.transportId else { return }
-                var metadata: [String: Any] = ["metadataType": 3, "title": track.title, "artist": track.artistLine]
-                if let album = track.album?.name { metadata["albumName"] = album }
-                if let art = Artwork.url(track.thumbnail, size: 720) { metadata["images"] = [["url": art.absoluteString]] }
-                var media: [String: Any] = ["contentId": url.absoluteString, "contentType": "audio/mp4", "streamType": "BUFFERED", "metadata": metadata]
-                if video != nil {
-                    // Fragmented MP4 pieces (the receiver otherwise expects MPEG-TS from HLS).
-                    media["contentType"] = "application/x-mpegurl"
-                    media["hlsSegmentFormat"] = "fmp4"
-                    media["hlsVideoSegmentFormat"] = "fmp4"
-                    // As a video, not a music track: the receiver then shows the picture full screen
-                    // (its music layout shows the artwork over it, and its bar stays up).
-                    metadata["metadataType"] = 0
-                    metadata["subtitle"] = track.artistLine
-                    media["metadata"] = metadata
-                    self.loadedAsVideo = true
-                }
-                if let duration = track.duration, duration.isFinite, duration > 0 { media["duration"] = duration }
-                castLog.notice("load \(track.videoId, privacy: .public) at \(position) as \(video == nil ? "sound" : "video", privacy: .public)")
-                self.loadRequestId = self.send(Namespace.media, ["type": "LOAD", "media": media, "autoplay": autoplay, "currentTime": position], to: transportId)
+                guard let transportId = self.transportId else { return }
+                self.loadedAsVideo = made.asVideo
+                self.loadedContentId = made.media["contentId"] as? String
+                self.loadedWithLyrics = made.withLyrics
+                self.lyricsShown = made.withLyrics
+                castLog.notice("load \(track.videoId, privacy: .public) at \(position) as \(made.asVideo ? "video" : "sound", privacy: .public)\(made.withLyrics ? " with lyrics" : "", privacy: .public)")
+                self.loadRequestId = self.send(Namespace.media, ["type": "LOAD", "media": made.media, "autoplay": autoplay, "currentTime": position,
+                                                                 "activeTrackIds": made.withLyrics ? [Self.lyricsTrackId] : []], to: transportId)
             }
         }
         if transportId != nil { send() } else { onReady = send }
+    }
+
+    private static let lyricsTrackId = 1
+
+    /// What the device gets for a song: its address (the music video as HLS, or the sound), what
+    /// it shows about it, and its synced lyrics as a text track. Nil without a network address.
+    private func media(for track: Track, soundOnly: Bool) async -> (media: [String: Any], asVideo: Bool, withLyrics: Bool)? {
+        // A music video as HLS; its sound alone when it can't be (see CastVideo).
+        let video = !soundOnly && castsVideo(track) ? await CastMediaServer.shared.videoURL(for: track) : nil
+        var sound: URL?
+        if video == nil { sound = try? await CastMediaServer.shared.url(for: track) }
+        guard let url = video ?? sound else { return nil }
+        var metadata: [String: Any] = ["metadataType": 3, "title": track.title, "artist": track.artistLine]
+        if let album = track.album?.name { metadata["albumName"] = album }
+        if let art = Artwork.url(track.thumbnail, size: 720) { metadata["images"] = [["url": art.absoluteString]] }
+        var media: [String: Any] = ["contentId": url.absoluteString, "contentType": "audio/mp4", "streamType": "BUFFERED", "metadata": metadata]
+        if video != nil {
+            // Fragmented MP4 pieces (the receiver otherwise expects MPEG-TS from HLS).
+            media["contentType"] = "application/x-mpegurl"
+            media["hlsSegmentFormat"] = "fmp4"
+            media["hlsVideoSegmentFormat"] = "fmp4"
+            // As a video, not a music track: the receiver then shows the picture full screen
+            // (its music layout shows the artwork over it, and its bar stays up).
+            metadata["metadataType"] = 0
+            metadata["subtitle"] = track.artistLine
+            media["metadata"] = metadata
+        }
+        if let duration = track.duration, duration.isFinite, duration > 0 { media["duration"] = duration }
+        // Lyrics over a music video (the receiver shows no captions with a song's cover), unless
+        // it's known to have no synced ones (still being looked up, the track goes along and is
+        // turned off if none turn up).
+        var withLyrics = false
+        if video != nil, wantsLyrics, CastMediaServer.shared.hasSyncedLyrics(track.videoId) != false,
+           let lyrics = CastMediaServer.shared.lyricsURL(for: track) {
+            media["tracks"] = [["trackId": Self.lyricsTrackId, "type": "TEXT", "subtype": "SUBTITLES", "name": String(localized: "Lyrics"),
+                                "trackContentId": lyrics.absoluteString, "trackContentType": "text/vtt"]]
+            media["textTrackStyle"] = ["fontScale": 1.2, "foregroundColor": "#FFFFFFFF", "backgroundColor": "#00000099", "edgeType": "NONE"]
+            withLyrics = true
+        }
+        return (media, video != nil, withLyrics)
+    }
+
+    /// Looks up a song's lyrics while it loads; with none, its lyrics track is turned off.
+    private func lookUpLyrics(_ track: Track) async {
+        await CastMediaServer.shared.prepareLyrics(track)
+        if loadedVideoId == track.videoId { applyLyrics() }
+    }
+
+    /// Shows or hides the lyrics track of the song on the device, as the setting and the lyrics
+    /// found say (only a song loaded with the track has one to show).
+    private func applyLyrics() {
+        guard loadedWithLyrics, let videoId = loadedVideoId, !settling else { return }
+        let show = lyricsOnTV && CastMediaServer.shared.hasSyncedLyrics(videoId) != false
+        guard show != lyricsShown, mediaCommand("EDIT_TRACKS_INFO", ["activeTrackIds": show ? [Self.lyricsTrackId] : []]) != nil else { return }
+        lyricsShown = show
+        castLog.notice("lyrics \(show ? "on" : "off", privacy: .public) for \(videoId, privacy: .public)")
+    }
+
+    private func lyricsSettingChanged() {
+        guard isActive else { return }
+        applyLyrics()
+        // The next song goes again, with or without its lyrics.
+        if let wanted = wantedNext {
+            wantedNext = nil
+            replaceNext = true
+            setNext(wanted.track)
+        }
+    }
+
+    // MARK: The device's queue
+
+    /// The song to play after this one on the device (nil for none: the end of the queue, Repeat
+    /// One). The player calls this whenever its next song may have changed.
+    func setNext(_ track: Track?) {
+        guard isActive, let track else {
+            nextGeneration += 1
+            if wantedNext != nil {
+                wantedNext = nil
+                syncQueue()
+            }
+            return
+        }
+        let askedVideo = castsVideo(track)
+        let askedLyrics = wantsLyrics(track) && CastMediaServer.shared.hasSyncedLyrics(track.videoId) != false
+        if let wanted = wantedNext, wanted.track.videoId == track.videoId, wanted.askedVideo == askedVideo,
+           wanted.askedLyrics == askedLyrics { return }
+        nextGeneration += 1
+        let generation = nextGeneration
+        Task {
+            guard let made = await media(for: track, soundOnly: false), generation == nextGeneration, isActive,
+                  let contentId = made.media["contentId"] as? String else { return }
+            wantedNext = QueuedSong(track: track, contentId: contentId, askedVideo: askedVideo, askedLyrics: askedLyrics,
+                                    asVideo: made.asVideo, withLyrics: made.withLyrics, media: made.media)
+            syncQueue()
+        }
+    }
+
+    /// A new load replaces the device's queue: nothing known about it until the device says.
+    private func resetQueue() {
+        deviceItems = []
+        currentItemId = nil
+        playedItemIds = []
+        removedItemIds = []
+        insertRequestId = nil
+        insertedContentId = nil
+        jumpItemId = nil
+        jumpRequestId = nil
+        replaceNext = false
+    }
+
+    /// Makes the device's queue match: the playing song, then the next one (once the song playing
+    /// has started, so nothing gets in the way of it).
+    private func syncQueue() {
+        guard let transportId, let mediaSessionId, currentItemId != nil, !settling, jumpItemId == nil else { return }
+        // An insert the device never answered is given up on.
+        if insertRequestId != nil, Date().timeIntervalSince(insertSentAt) > 8 {
+            insertRequestId = nil
+            insertedContentId = nil
+        }
+        var plan = CastQueueSync.plan(items: deviceItems, currentItemId: currentItemId, next: replaceNext ? nil : wantedNext?.contentId,
+                                      inserting: insertRequestId != nil)
+        if replaceNext, insertRequestId == nil {
+            replaceNext = false
+            plan.insert = wantedNext != nil
+        }
+        if !plan.remove.isEmpty {
+            send(Namespace.media, ["type": "QUEUE_REMOVE", "mediaSessionId": mediaSessionId, "itemIds": plan.remove], to: transportId)
+            deviceItems.removeAll { plan.remove.contains($0.id) }
+            removedItemIds.formUnion(plan.remove)
+            castLog.notice("queue: removed \(plan.remove.map(String.init).joined(separator: ","), privacy: .public)")
+        }
+        guard plan.insert, let next = wantedNext else { return }
+        var item: [String: Any] = ["media": next.media, "autoplay": true, "preloadTime": 20]
+        if next.withLyrics { item["activeTrackIds"] = [Self.lyricsTrackId] }
+        insertRequestId = send(Namespace.media, ["type": "QUEUE_INSERT", "mediaSessionId": mediaSessionId, "items": [item]], to: transportId)
+        insertedContentId = next.contentId
+        insertSentAt = Date()
+        castLog.notice("queue: next is \(next.track.videoId, privacy: .public) as \(next.asVideo ? "video" : "sound", privacy: .public)")
+    }
+
+    /// The device's queue as it lists it: in a status (`items`), or as ids alone (QUEUE_ITEM_IDS,
+    /// QUEUE_CHANGE). An item that's new is the one being inserted.
+    private func learnItems(_ listed: [(id: Int, contentId: String?)], complete: Bool) {
+        if complete { removedItemIds.formIntersection(listed.map(\.id)) }
+        let listed = listed.filter { !removedItemIds.contains($0.id) }
+        var items = complete ? [] : deviceItems
+        // Inserted items go at the end: the last one not known yet.
+        let inserted = listed.last { item in
+            item.contentId == nil && item.id != currentItemId && !deviceItems.contains { $0.id == item.id }
+        }?.id
+        for (id, contentId) in listed {
+            let known = deviceItems.first { $0.id == id }?.contentId
+            var address = contentId ?? known
+            if address == nil, id == currentItemId { address = loadedContentId }
+            if address == nil, id == inserted, let insertedContentId {
+                address = insertedContentId
+                self.insertedContentId = nil
+            }
+            items.removeAll { $0.id == id }
+            items.append(.init(id: id, contentId: address ?? ""))
+        }
+        if let inserted = insertedContentId, items.contains(where: { $0.contentId == inserted && $0.id != currentItemId }) {
+            insertedContentId = nil
+        }
+        if insertedContentId == nil { insertRequestId = nil }
+        deviceItems = items
+    }
+
+    /// Skips to the song queued on the device, if it's this one: it's already there (and loading
+    /// near the end of the song before), so it starts sooner than a new load.
+    private func jumpToQueued(_ track: Track) -> Bool {
+        guard let next = wantedNext, next.track.videoId == track.videoId, next.askedVideo == castsVideo(track),
+              !settling, jumpItemId == nil,
+              let item = deviceItems.first(where: { $0.id != currentItemId && $0.contentId == next.contentId }),
+              let request = mediaCommand("QUEUE_UPDATE", ["currentItemId": item.id]) else { return false }
+        castLog.notice("skip to queued \(track.videoId, privacy: .public) (item \(item.id))")
+        loadGeneration += 1
+        becameCurrent(next)
+        remoteTime = 0
+        remoteTimeAt = Date()
+        remoteBuffering = true
+        remotePlaying = true
+        pendingPlaying = nil
+        pendingSeek = nil
+        settling = true
+        settlingSince = Date()
+        loadRequestId = nil
+        jumpItemId = item.id
+        jumpRequestId = request
+        return true
+    }
+
+    /// The queued song is the one playing now (skipped to, or the device moved on by itself).
+    private func becameCurrent(_ next: QueuedSong) {
+        loadedVideoId = next.track.videoId
+        loadedTrack = next.track
+        loadedAsVideo = next.asVideo
+        loadedContentId = next.contentId
+        loadedWithLyrics = next.withLyrics
+        lyricsShown = next.withLyrics
+        videoPlayed = false
+        wantedNext = nil
+        nextGeneration += 1
+    }
+
+    /// The jump to the queued song didn't happen: it loads the usual way.
+    private func jumpFailed() {
+        guard jumpItemId != nil, let track = loadedTrack else { return }
+        castLog.notice("skip to queued \(track.videoId, privacy: .public) didn't happen: loading it")
+        jumpItemId = nil
+        jumpRequestId = nil
+        load(track, at: 0, autoplay: true)
     }
 
     /// Play and pause show at once and reach the device as soon as it can take them (right after
@@ -311,14 +572,14 @@ final class CastController {
         if !playing { remoteBuffering = false }
         pendingPlaying = playing
         pendingSince = Date()
-        pendingPlayingSent = mediaCommand(playing ? "PLAY" : "PAUSE")
+        pendingPlayingSent = mediaCommand(playing ? "PLAY" : "PAUSE") != nil
         PlayerController.shared.castStatusChanged()
     }
 
     func seek(to seconds: TimeInterval) {
         remoteTime = seconds
         remoteTimeAt = Date()
-        pendingSeek = mediaCommand("SEEK", ["currentTime": seconds]) ? nil : seconds
+        pendingSeek = mediaCommand("SEEK", ["currentTime": seconds]) != nil ? nil : seconds
     }
 
     /// The receiver's own volume (0…1), like the TV's.
@@ -326,15 +587,15 @@ final class CastController {
         send(Namespace.receiver, ["type": "SET_VOLUME", "volume": ["level": min(1, max(0, level)), "muted": muted]], to: "receiver-0")
     }
 
-    /// Sends a command for the song on the device; false when there's no session to send it to yet.
+    /// Sends a command for the song on the device; its request id, nil when there's no session to
+    /// send it to yet.
     @discardableResult
-    private func mediaCommand(_ type: String, _ extra: [String: Any] = [:]) -> Bool {
-        guard let transportId, let mediaSessionId else { return false }
+    private func mediaCommand(_ type: String, _ extra: [String: Any] = [:]) -> Int? {
+        guard let transportId, let mediaSessionId else { return nil }
         var payload = extra
         payload["type"] = type
         payload["mediaSessionId"] = mediaSessionId
-        send(Namespace.media, payload, to: transportId)
-        return true
+        return send(Namespace.media, payload, to: transportId)
     }
 
     // MARK: Messages
@@ -383,6 +644,9 @@ final class CastController {
     private func handle(_ message: CastMessage) {
         guard let json = (try? JSONSerialization.jsonObject(with: Data(message.payload.utf8))) as? [String: Any],
               let type = json["type"] as? String else { return }
+        #if DEBUG
+        if message.namespace == Namespace.media { castLog.debug("media: \(message.payload.prefix(1500), privacy: .public)") }
+        #endif
         switch (message.namespace, type) {
         case (Namespace.heartbeat, "PING"):
             send(Namespace.heartbeat, ["type": "PONG"], to: message.sourceId)
@@ -399,6 +663,26 @@ final class CastController {
             }
             if type == "LOAD_FAILED", loadedAsVideo { soundInstead(); return }
             fail(type)
+        case (Namespace.media, "QUEUE_ITEM_IDS"):
+            learnItems((json["itemIds"] as? [Int] ?? []).map { ($0, nil) }, complete: true)
+            syncQueue()
+        case (Namespace.media, "QUEUE_CHANGE"):
+            let ids = json["itemIds"] as? [Int] ?? []
+            switch json["changeType"] as? String {
+            case "INSERT": learnItems(ids.map { ($0, nil) }, complete: false)
+            case "REMOVE":
+                deviceItems.removeAll { ids.contains($0.id) }
+                removedItemIds.subtract(ids)
+            default: break
+            }
+        case (Namespace.media, "INVALID_REQUEST"), (Namespace.media, "ERROR"):
+            let id = json["requestId"] as? Int
+            castLog.notice("\(type, privacy: .public) for request \(id ?? -1): \(json["reason"] as? String ?? json["detailedErrorCode"].map { "\($0)" } ?? "-", privacy: .public)")
+            if let id, id == insertRequestId {
+                insertRequestId = nil
+                insertedContentId = nil
+            }
+            if let id, id == jumpRequestId { jumpFailed() }
         case (Namespace.receiver, "LAUNCH_ERROR"):
             fail(type)
         case (Namespace.connection, "CLOSE") where message.sourceId == transportId || message.sourceId == "receiver-0":
@@ -428,7 +712,9 @@ final class CastController {
     var debugState: [String: Any] {
         ["device": device?.name ?? "", "state": "\(state)", "videoId": loadedVideoId ?? "", "asVideo": loadedAsVideo,
          "videoRefused": videoRefused, "playing": remotePlaying, "buffering": remoteBuffering, "settling": settling,
-         "position": (position * 10).rounded() / 10, "session": mediaSessionId ?? -1]
+         "position": (position * 10).rounded() / 10, "session": mediaSessionId ?? -1,
+         "lyrics": loadedWithLyrics ? (lyricsShown ? "on" : "off") : "none", "nextVideoId": wantedNext?.track.videoId ?? "",
+         "currentItem": currentItemId ?? -1, "items": deviceItems.map { "\($0.id):\(CastQueueSync.videoId(fromContentId: $0.contentId) ?? "?")" }]
     }
     #endif
 
@@ -477,11 +763,46 @@ final class CastController {
         if let id, id != mediaSessionId {
             mediaSessionId = id
             // What was asked for before the device could take it.
-            if let pendingPlaying, !pendingPlayingSent { pendingPlayingSent = mediaCommand(pendingPlaying ? "PLAY" : "PAUSE") }
-            if let pendingSeek, mediaCommand("SEEK", ["currentTime": pendingSeek]) { self.pendingSeek = nil }
+            if let pendingPlaying, !pendingPlayingSent { pendingPlayingSent = mediaCommand(pendingPlaying ? "PLAY" : "PAUSE") != nil }
+            if let pendingSeek, mediaCommand("SEEK", ["currentTime": pendingSeek]) != nil { self.pendingSeek = nil }
         }
         let playerState = status["playerState"] as? String ?? ""
-        castLog.debug("status \(playerState, privacy: .public) session \(id ?? -1) at \(status["currentTime"] as? Double ?? -1) reason \(status["idleReason"] as? String ?? "-", privacy: .public)")
+        let itemId = status["currentItemId"] as? Int
+        castLog.debug("status \(playerState, privacy: .public) session \(id ?? -1) item \(itemId ?? -1) at \(status["currentTime"] as? Double ?? -1) reason \(status["idleReason"] as? String ?? "-", privacy: .public)")
+        // The device's queue, as it lists it (or, answering an insert without the list, asked for).
+        if let items = status["items"] as? [[String: Any]] {
+            learnItems(items.compactMap { item in
+                (item["itemId"] as? Int).map { ($0, (item["media"] as? [String: Any])?["contentId"] as? String) }
+            }, complete: true)
+        } else if let request = json["requestId"] as? Int, request == insertRequestId {
+            mediaCommand("QUEUE_GET_ITEM_IDS")
+        }
+        // Skipped to the queued song: until the device is on it, what it reports is the song before.
+        if let jumpItemId {
+            guard itemId == jumpItemId else {
+                if Date().timeIntervalSince(settlingSince) > 8 { jumpFailed(); return }
+                remoteBuffering = true
+                PlayerController.shared.castStatusChanged()
+                return
+            }
+            self.jumpItemId = nil
+            jumpRequestId = nil
+            if let currentItemId { playedItemIds.insert(currentItemId) }
+            currentItemId = itemId
+        } else if let itemId, playedItemIds.contains(itemId) {
+            // The song before, still reporting.
+            return
+        } else if let itemId, itemId != currentItemId {
+            let before = currentItemId
+            currentItemId = itemId
+            if let before {
+                playedItemIds.insert(before)
+                if !settling { deviceMovedOn(to: itemId, status: status) }
+            }
+        }
+        if let currentItemId, !deviceItems.contains(where: { $0.id == currentItemId }) {
+            deviceItems.append(.init(id: currentItemId, contentId: loadedContentId ?? ""))
+        }
         // Right after a load the device reports idle and buffering at 0:00 before it seeks to
         // the asked-for point: until it's actually playing or paused, keep showing the load.
         if settling, playerState == "PLAYING" || playerState == "PAUSED" || Date().timeIntervalSince(settlingSince) > 20 {
@@ -518,11 +839,46 @@ final class CastController {
         remoteBuffering = playerState == "BUFFERING"
         if playerState == "IDLE", let reason = status["idleReason"] as? String {
             switch reason {
+            case "FINISHED" where nextIsQueued:
+                // The device goes on to the queued song by itself; should it not, the player does.
+                let finished = loadedVideoId
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                    MainActor.assumeIsolated {
+                        let cast = CastController.shared
+                        guard cast.isActive, cast.loadedVideoId == finished, cast.jumpItemId == nil, !cast.settling else { return }
+                        PlayerController.shared.castFinishedSong(finished)
+                    }
+                }
             case "FINISHED": PlayerController.shared.castFinishedSong(loadedVideoId)
             case "ERROR": fail(reason)
             default: break
             }
         }
         PlayerController.shared.castStatusChanged()
+        syncQueue()
+        applyLyrics()
+    }
+
+    /// The next song is on the device's queue, after the one playing.
+    private var nextIsQueued: Bool {
+        guard let next = wantedNext else { return false }
+        return deviceItems.contains { $0.id != currentItemId && $0.contentId == next.contentId }
+    }
+
+    /// The device went on to another item of its queue by itself (the song playing ended).
+    private func deviceMovedOn(to itemId: Int, status: [String: Any]) {
+        let contentId = deviceItems.first { $0.id == itemId }?.contentId ?? (status["media"] as? [String: Any])?["contentId"] as? String
+        guard let next = wantedNext, contentId == next.contentId else {
+            // Not the song the app has next (its queue changed just then): the app's next one loads.
+            castLog.notice("moved on to an item that isn't next (\(contentId.flatMap(CastQueueSync.videoId(fromContentId:)) ?? "?", privacy: .public)): loading the next song")
+            PlayerController.shared.castFinishedSong(loadedVideoId)
+            return
+        }
+        castLog.notice("moved on to queued \(next.track.videoId, privacy: .public)")
+        loadGeneration += 1
+        becameCurrent(next)
+        remoteTime = status["currentTime"] as? Double ?? 0
+        remoteTimeAt = Date()
+        PlayerController.shared.castAdvanced(to: next.track.videoId)
     }
 }

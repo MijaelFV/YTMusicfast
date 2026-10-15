@@ -630,6 +630,7 @@ private struct GeneralSettings: View {
     var openTab: (String) -> Void
     @Bindable private var player = PlayerController.shared
     @Bindable private var video = VideoController.shared
+    @Bindable private var cast = CastController.shared
     @Bindable private var eq = Equalizer.shared
     @AppStorage("audioQuality") private var audioQuality = "high"
     @AppStorage(AppAppearance.key) private var appearance = AppAppearance.dark
@@ -747,6 +748,12 @@ private struct GeneralSettings: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Toggle("Skip non-music parts of music videos", isOn: $player.skipNonMusic)
                     Text("Intros, skits and outros marked by the SponsorBlock community.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Show lyrics on the TV when casting", isOn: $cast.lyricsOnTV)
+                    Text("Synced lyrics appear as captions over music videos (Video mode) on a Chromecast or Google TV.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

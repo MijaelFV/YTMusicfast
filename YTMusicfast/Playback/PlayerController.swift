@@ -1478,18 +1478,28 @@ final class PlayerController {
         resyncUpcoming()
     }
 
-    /// Casting: the next song, in the mode you're in and its stream looked up, so it starts on the
-    /// device without waiting.
+    /// Casting: the next song, in the mode you're in and its stream looked up, goes on the device's
+    /// queue, so it follows without a new load (and the TV shows it's up next). Called whenever
+    /// the next song may have changed: a new song, the queue edited, shuffle, repeat, Song/Video.
     private func prepareNextForCast() {
-        guard let next = upNext.first else { return }
-        Task {
+        castNextTask?.cancel()
+        guard repeatMode != .one, let index = currentIndex,
+              let nextIndex = index + 1 < queue.count ? index + 1 : (repeatMode == .all ? 0 : nil),
+              queue.indices.contains(nextIndex), nextIndex != index else {
+            CastController.shared.setNext(nil)
+            return
+        }
+        let next = queue[nextIndex]
+        castNextTask = Task {
             var entry = next
             if Self.needsOtherVersion(entry), let other = await Self.otherVersion(of: entry, video: VideoController.shared.videoMode),
-               let at = queue.firstIndex(where: { $0.id == entry.id }), at != currentIndex {
+               !Task.isCancelled, let at = queue.firstIndex(where: { $0.id == entry.id }), at != currentIndex {
                 entry = Self.entry(entry, as: other, video: VideoController.shared.videoMode)
                 queue[at] = entry
             }
             await CastMediaServer.shared.prepare(entry.track)
+            guard !Task.isCancelled, CastController.shared.isActive else { return }
+            CastController.shared.setNext(entry.track)
         }
     }
 
@@ -1572,6 +1582,7 @@ final class PlayerController {
     @ObservationIgnored private var castClock: Timer?
     @ObservationIgnored private var applyingCastVolume = false
     @ObservationIgnored private var castVolumeTask: Task<Void, Never>?
+    @ObservationIgnored private var castNextTask: Task<Void, Never>?
 
     /// Casting began: what's playing moves to the device, from where it is, and this Mac goes quiet.
     func castingStarted() {
@@ -1590,6 +1601,7 @@ final class PlayerController {
         pruneSources()
         guard let track = current else { return }
         CastController.shared.load(track, at: position, autoplay: playing)
+        prepareNextForCast()
         sendCastVolume()
         castClock?.invalidate()
         // The device reports its position now and then; between reports the clock runs here,
@@ -1605,6 +1617,7 @@ final class PlayerController {
     func castingEnded(at position: TimeInterval, playing: Bool) {
         castClock?.invalidate()
         castClock = nil
+        castNextTask?.cancel()
         isPlaying = false
         guard current != nil else { return }
         pendingSeek = position > 1 ? position : nil
@@ -1634,6 +1647,23 @@ final class PlayerController {
         } else {
             next()
         }
+    }
+
+    /// The device went on by itself to the song queued there: the queue here follows, and nothing
+    /// loads. Should that song not be next here any more, the next one here plays instead.
+    func castAdvanced(to videoId: String) {
+        guard let index = currentIndex else { return }
+        guard let now = CastQueueSync.indexAfterAdvance(queue: queue.map(\.track.videoId), current: index, to: videoId,
+                                                        repeatAll: repeatMode == .all) else {
+            next()
+            return
+        }
+        dropWaitingSkip()
+        currentIndex = now
+        currentTime = 0
+        pendingSeek = nil
+        trackDidChange()
+        castStatusChanged()
     }
 
     /// The volume was changed on the device (its remote, Google Home).
@@ -1729,8 +1759,8 @@ final class PlayerController {
             } else {
                 CastController.shared.load(entry.track, at: position, autoplay: autoplay)
             }
+            // Its next song goes on the device's queue from here (see enqueueNext).
             trackDidChange()
-            prepareNextForCast()
             return
         }
 
@@ -1854,7 +1884,9 @@ final class PlayerController {
     /// Queues the following track in AVQueuePlayer (and downloads it) so the transition is gapless.
     private func enqueueNext() {
         enqueueTask?.cancel()
-        guard repeatMode != .one, !CastController.shared.isActive, let index = currentIndex else { return }
+        // Casting: the next song goes on the device's queue instead.
+        if CastController.shared.isActive { prepareNextForCast(); return }
+        guard repeatMode != .one, let index = currentIndex else { return }
         let nextIndex = index + 1 < queue.count ? index + 1 : (repeatMode == .all ? 0 : nil)
         guard let nextIndex, queue.indices.contains(nextIndex), nextIndex != index else { return }
         let entry = queue[nextIndex]

@@ -21,6 +21,9 @@ final class CastMediaServer {
     private var streams: [String: StreamInfo] = [:]
     /// Music videos being cast (the playing one and the next), by video id.
     private var videos: [String: CastVideo] = [:]
+    /// Synced lyrics as WebVTT for the TV, by video id (nil: the song has none).
+    private var lyrics: [String: String?] = [:]
+    private var lyricsLookups: [String: Task<Bool, Never>] = [:]
 
     private init() {}
 
@@ -28,10 +31,48 @@ final class CastMediaServer {
     func url(for track: Track) async throws -> URL {
         try await start()
         guard let port, let host = PhoneRemote.localIPv4() else { throw URLError(.cannotConnectToHost) }
-        tracks[track.videoId] = track
-        if tracks.count > 20 { tracks = tracks.filter { $0.key == track.videoId } }
+        remember(track)
         let name = track.videoId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? track.videoId
         return URL(string: "http://\(host):\(port)/cast/\(secret)/\(name)")!
+    }
+
+    /// The songs the device may ask for; the playing one stays when older ones are dropped.
+    private func remember(_ track: Track) {
+        tracks[track.videoId] = track
+        if tracks.count > 20 { tracks = tracks.filter { $0.key == track.videoId || $0.key == CastController.shared.loadedVideoId } }
+    }
+
+    /// The address of a song's synced lyrics as a WebVTT text track (looked up when the device
+    /// asks, if not before; an empty track when there are none). Nil until the server runs.
+    func lyricsURL(for track: Track) -> URL? {
+        guard let port, let host = PhoneRemote.localIPv4() else { return nil }
+        remember(track)
+        let name = track.videoId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? track.videoId
+        return URL(string: "http://\(host):\(port)/cast/\(secret)/l/\(name).vtt")
+    }
+
+    /// Whether a song has synced lyrics: nil when not looked up yet.
+    func hasSyncedLyrics(_ videoId: String) -> Bool? {
+        lyrics[videoId].map { $0 != nil }
+    }
+
+    /// Looks up a song's synced lyrics for the TV (one request, cached); whether it has any.
+    @discardableResult
+    func prepareLyrics(_ track: Track) async -> Bool {
+        if let known = lyrics[track.videoId] { return known != nil }
+        // Asked for from several places at once (the load, the device, the next song): one lookup.
+        if let running = lyricsLookups[track.videoId] { return await running.value }
+        let lookup = Task {
+            let found = await LyricsService.shared.lyrics(for: track, duration: track.duration ?? 0)
+            return CastLyrics.webVTT(found, duration: track.duration)
+        }
+        lyricsLookups[track.videoId] = Task { await lookup.value != nil }
+        let vtt = await lookup.value
+        lyricsLookups[track.videoId] = nil
+        guard listener != nil else { return vtt != nil }
+        if lyrics.count > 40 { lyrics = [:] }
+        lyrics[track.videoId] = .some(vtt)
+        return vtt != nil
     }
 
     /// The address of a music video as HLS, or nil when it can't be cast as one (then its sound
@@ -97,7 +138,9 @@ final class CastMediaServer {
     /// Looks up the next song's stream ahead of time, so a skip while casting doesn't wait for
     /// YouTube. One request per song (a few for a music video), only while casting.
     func prepare(_ track: Track) async {
-        guard listener != nil, track.localPath == nil else { return }
+        guard listener != nil else { return }
+        if CastController.shared.wantsLyrics(track) { await prepareLyrics(track) }
+        guard track.localPath == nil else { return }
         if CastController.shared.castsVideo(track) {
             _ = await video(for: track)
             return
@@ -115,6 +158,7 @@ final class CastMediaServer {
         tracks = [:]
         streams = [:]
         videos = [:]
+        lyrics = [:]
     }
 
     private func start() async throws {
@@ -183,6 +227,14 @@ final class CastMediaServer {
         if parts.count > 1, path.count == 5, path[0] == "cast", path[1] == secret, path[2] == "v" {
             await respondVideo(videoId: path[3].removingPercentEncoding ?? path[3], file: path[4], range: headers["range"],
                                head: parts[0] == "HEAD", on: connection)
+            return
+        }
+        if parts.count > 1, path.count == 4, path[0] == "cast", path[1] == secret, path[2] == "l", path[3].hasSuffix(".vtt"),
+           let videoId = String(path[3].dropLast(4)).removingPercentEncoding, let track = tracks[videoId] {
+            await prepareLyrics(track)
+            let vtt = (lyrics[videoId] ?? nil) ?? CastLyrics.empty
+            mediaLog.debug("lyrics \(videoId, privacy: .public): \(vtt.count) bytes")
+            send(status: "200 OK", headers: ["Content-Type": "text/vtt; charset=utf-8"], body: parts[0] == "HEAD" ? Data() : Data(vtt.utf8), on: connection)
             return
         }
         guard parts.count > 1, path.count == 3, path[0] == "cast", path[1] == secret,
