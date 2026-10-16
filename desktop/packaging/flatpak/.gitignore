@@ -1,0 +1,6 @@
+# Generated from Cargo.lock by flatpak-cargo-generator.py (see desktop/README.md), and build output.
+cargo-sources.json
+.flatpak-builder/
+build/
+repo/
+*.flatpak

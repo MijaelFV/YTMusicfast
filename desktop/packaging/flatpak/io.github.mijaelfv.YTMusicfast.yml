@@ -1,0 +1,167 @@
+# Flatpak build of YT Musicfast. Flatpak installs update from where they came from (Flathub or
+# the bundle's repository), so the app's own updater (ytm-update) stays off inside Flatpak.
+#
+# Build it from the repository (see desktop/README.md):
+#   python3 flatpak-cargo-generator.py desktop/Cargo.lock -o desktop/packaging/flatpak/cargo-sources.json
+#   flatpak-builder --user --install-deps-from=flathub --force-clean --repo=repo build \
+#     desktop/packaging/flatpak/io.github.mijaelfv.YTMusicfast.yml
+#
+# For Flathub, the app's `dir` source becomes a `git` source (the release tag and its commit),
+# and cargo-sources.json is committed next to the manifest in the Flathub repository.
+
+id: io.github.mijaelfv.YTMusicfast
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: ytmusicfast
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri                 # OpenGL for the interface and music videos
+  - --socket=pulseaudio          # sound (PipeWire systems serve it too)
+  # Media controls (MPRIS): the name ytm-system registers on the session bus.
+  - --own-name=org.mpris.MediaPlayer2.ytmusicfast
+  # The sign-in session is kept in the Secret Service keyring (GNOME Keyring, KWallet).
+  - --talk-name=org.freedesktop.secrets
+  # "Now playing" notifications.
+  - --talk-name=org.freedesktop.Notifications
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/man
+  - '*.la'
+  - '*.a'
+
+modules:
+  # libmpv and what it needs beyond the runtime, built without GPL-only parts so it stays LGPL.
+  # The same sources Flathub's Celluloid (a libmpv player) builds on this runtime generation.
+  - name: libass
+    config-opts:
+      - --disable-static
+    sources:
+      - type: archive
+        url: https://github.com/libass/libass/releases/download/0.17.5/libass-0.17.5.tar.xz
+        sha256: 2dca25c0e0c837ddf00b52011b3f82cac1e4ddd3ad018227806b0c2288864acc
+        x-checker-data:
+          type: anitya
+          project-id: 1560
+          stable-only: true
+          url-template: https://github.com/libass/libass/releases/download/$version/libass-$version.tar.xz
+
+  - name: libplacebo
+    buildsystem: meson
+    config-opts:
+      - -Ddemos=false
+      - -Dtests=false
+    sources:
+      - type: git
+        url: https://github.com/haasn/libplacebo.git
+        tag: v7.360.1
+        commit: cee9b076f2c63104ccfd497fa79c39a867293ec4
+        x-checker-data:
+          type: git
+          tag-pattern: ^v([\d.]+)$
+
+  - name: ffmpeg
+    # Decoding and streaming only: YouTube's Opus/AAC audio and VP9/AV1/H.264 video over HTTPS.
+    config-opts:
+      - --enable-shared
+      - --disable-static
+      - --disable-doc
+      - --disable-programs
+      - --disable-encoders
+      - --disable-muxers
+      - --disable-devices
+      - --enable-gnutls
+      - --enable-libdav1d
+    cleanup:
+      - /share/ffmpeg
+    sources:
+      - type: archive
+        url: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+        sha256: 8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
+        x-checker-data:
+          type: anitya
+          project-id: 5405
+          stable-only: true
+          url-template: https://ffmpeg.org/releases/ffmpeg-$version.tar.xz
+
+  - name: libmpv
+    buildsystem: meson
+    config-opts:
+      - -Dlibmpv=true
+      - -Dcplayer=false
+      - -Dgpl=false
+      - -Dbuild-date=false
+      - -Dlua=disabled
+      - -Djavascript=disabled
+      - -Dlibavdevice=disabled
+      - -Dalsa=disabled          # no ALSA device access; sound goes through PulseAudio
+      - -Dpipewire=disabled      # no PipeWire socket either (PipeWire serves PulseAudio clients)
+      - -Dmanpage-build=disabled
+      - -Dhtml-build=disabled
+    cleanup:
+      - /share/applications
+      - /share/bash-completion
+      - /share/doc
+      - /share/icons
+      - /share/zsh
+    sources:
+      - type: archive
+        url: https://github.com/mpv-player/mpv/archive/v0.41.0.tar.gz
+        sha256: ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209
+        x-checker-data:
+          type: anitya
+          project-id: 5348
+          stable-only: true
+          url-template: https://github.com/mpv-player/mpv/archive/v$version.tar.gz
+
+  - name: ytmusicfast
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/ytmusicfast/cargo
+        CARGO_NET_OFFLINE: 'true'
+        # No build paths in the binary.
+        RUSTFLAGS: --remap-path-prefix=/run/build/ytmusicfast=/build
+    build-commands:
+      - cargo --offline fetch --manifest-path Cargo.toml --verbose
+      - cargo --offline build --release --locked -p ytmusicfast
+      - install -Dm755 target/release/ytmusicfast -t ${FLATPAK_DEST}/bin
+      # The sign-in helper is a WebKitGTK web view, and WebKitGTK 4.1 isn't in this runtime
+      # (it is in org.gnome.Platform): see desktop/README.md before shipping this Flatpak.
+      - |
+        if [ -d crates/ytmusicfast-signin ]; then
+          if pkg-config --exists webkit2gtk-4.1; then
+            cargo --offline build --release --locked -p ytmusicfast-signin
+            install -Dm755 target/release/ytmusicfast-signin -t ${FLATPAK_DEST}/bin
+          else
+            echo "WARNING: WebKitGTK 4.1 isn't in this runtime; building without ytmusicfast-signin" >&2
+          fi
+        fi
+      - install -Dm644 packaging/linux/${FLATPAK_ID}.desktop -t ${FLATPAK_DEST}/share/applications
+      - install -Dm644 packaging/linux/${FLATPAK_ID}.metainfo.xml -t ${FLATPAK_DEST}/share/metainfo
+      - |
+        for size in 16 24 32 48 64 128 256 512; do
+          install -Dm644 packaging/icons/hicolor/${size}x${size}/apps/${FLATPAK_ID}.png \
+            -t ${FLATPAK_DEST}/share/icons/hicolor/${size}x${size}/apps
+        done
+      - install -Dm644 LICENSE -t ${FLATPAK_DEST}/share/licenses/${FLATPAK_ID}
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - packaging/flatpak/.flatpak-builder
+          - packaging/flatpak/build
+          - packaging/flatpak/repo
+      - type: file
+        path: ../../../LICENSE
+      - cargo-sources.json
