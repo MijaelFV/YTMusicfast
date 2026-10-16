@@ -13,7 +13,8 @@
 # libmpv and everything it needs from that system, except what has to come from the running
 # system (the C library, GPU drivers, display and sound servers, fonts; see excludelist). Built on
 # Debian 12, the AppImage runs on distributions with glibc 2.36 or later. Needs patchelf,
-# squashfs-tools, dpkg (for the bundled libraries' copyright files) and vpk.
+# squashfs-tools, zstd (for delta packages), dpkg (for the bundled libraries' copyright files)
+# and vpk.
 # Set REQUIRE_UPDATE_HOOK=1 to fail when the app doesn't call ytm_update::startup().
 set -euo pipefail
 source "$(dirname "$0")/../common.sh"
@@ -144,10 +145,10 @@ vpk pack \
   --outputDir "$releases" \
   "${notes_args[@]}"
 
-# Attach what this release added: not the previous release's package (it stays attached to that
-# release), vpk's list of build outputs, or the RELEASES file for apps moving over from Squirrel.
+# Attach what this release added: not the earlier releases' packages (they stay attached to their
+# releases), vpk's list of build outputs, or the RELEASES file for apps moving over from Squirrel.
 while IFS= read -r file; do
-  grep -qxF -- "$file" <<< "$before" && continue
+  [[ "$file" == *.nupkg ]] && grep -qxF -- "$file" <<< "$before" && continue
   [[ "$file" == assets.*.json || "$file" == RELEASES* ]] && continue
   cp "$releases/$file" "$publish/"
 done < <(ls -A "$releases")

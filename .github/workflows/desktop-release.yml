@@ -246,8 +246,8 @@ jobs:
       - name: Install Debian packages
         working-directory: /
         # The build: compiler, Slint's Linux libraries (as in desktop.yml) and what libmpv is built
-        # from (build-libmpv.sh). Packaging: patchelf, squashfs-tools, ICU for vpk (.NET), and the
-        # desktop and AppStream validators.
+        # from (build-libmpv.sh). Packaging: patchelf, squashfs-tools, zstd (vpk's delta packages),
+        # ICU for vpk (.NET), and the desktop and AppStream validators.
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
@@ -255,7 +255,7 @@ jobs:
             libfontconfig-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             nasm ninja-build python3-venv libass-dev libgnutls28-dev libdav1d-dev zlib1g-dev \
             libpulse-dev libasound2-dev \
-            patchelf squashfs-tools libicu72 desktop-file-utils appstream
+            patchelf squashfs-tools zstd libicu72 desktop-file-utils appstream
 
       - uses: actions/checkout@v7.0.1
 

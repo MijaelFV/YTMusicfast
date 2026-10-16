@@ -78,13 +78,14 @@ vpk pack \
   --shortcuts "Desktop,StartMenuRoot" \
   --aumid "$APP_ID" \
   --channel win \
+  --runtime win-x64 \
   --outputDir "$(native_path "$releases")" \
   "${notes_args[@]}"
 
-# Attach what this release added: not the previous release's package (it stays attached to that
-# release), vpk's list of build outputs, or the RELEASES file for apps moving over from Squirrel.
+# Attach what this release added: not the earlier releases' packages (they stay attached to their
+# releases), vpk's list of build outputs, or the RELEASES file for apps moving over from Squirrel.
 while IFS= read -r file; do
-  grep -qxF -- "$file" <<< "$before" && continue
+  [[ "$file" == *.nupkg ]] && grep -qxF -- "$file" <<< "$before" && continue
   [[ "$file" == assets.*.json || "$file" == RELEASES* ]] && continue
   cp "$releases/$file" "$publish/"
 done < <(ls -A "$releases")
