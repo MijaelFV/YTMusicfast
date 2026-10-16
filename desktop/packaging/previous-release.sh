@@ -19,7 +19,7 @@ mkdir -p "$out"
 api() {
   local -a auth=()
   [[ -n "${GH_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer $GH_TOKEN")
-  curl -fsSL --retry 3 -H "Accept: application/vnd.github+json" "${auth[@]}" "$@"
+  curl -fsSL --retry 3 -H "Accept: application/vnd.github+json" ${auth[@]+"${auth[@]}"} "$@"
 }
 
 # Published (not draft) desktop releases: "<version> <feed url>" for those with this channel's feed.
@@ -34,10 +34,13 @@ candidates=$(
   done
 )
 
-# The newest one older than this version (sort -V orders 0.1.10 after 0.1.9; prereleases such as
-# 0.2.0-beta.1 sort after 0.2.0 there, so they are skipped as delta bases for 0.2.0 itself).
+# The newest one older than this version. A stable version builds its delta from the previous
+# stable one, which is what stable copies run; a prerelease from any. (sort -V orders 0.1.10 after
+# 0.1.9, but a prerelease such as 0.2.0-beta.1 after 0.2.0, hence the filter.)
+versions=$(cut -d' ' -f1 <<< "$candidates" | grep -v '^$' || true)
+[[ "$version" == *-* ]] || versions=$(grep -v -- - <<< "$versions" || true)
 previous=$(
-  { echo "$version"; cut -d' ' -f1 <<< "$candidates"; } | grep -v '^$' | sort -uV \
+  { echo "$version"; echo "$versions"; } | grep -v '^$' | sort -uV \
     | awk -v v="$version" '$0 == v { print prev; exit } { prev = $0 }'
 )
 if [[ -z "$previous" ]]; then
@@ -56,7 +59,7 @@ api -o "$out/$full" "${feed_url%/*}/$full"
 # vpk trusts what it finds in the folder: check the package against the feed.
 expected=$(jq -r --arg f "$full" '.Assets[] | select(.FileName == $f) | .SHA256' "$out/releases.$channel.json")
 actual=$(sha256sum "$out/$full" | cut -d' ' -f1)
-if [[ "${expected,,}" != "$actual" ]]; then
+if [[ "$(tr '[:upper:]' '[:lower:]' <<< "$expected")" != "$actual" ]]; then
   echo "::error::$full doesn't match the SHA-256 in its release feed" >&2
   exit 1
 fi
