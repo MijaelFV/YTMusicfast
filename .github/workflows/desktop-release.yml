@@ -1,0 +1,558 @@
+name: Desktop release
+
+# Builds and tests the Windows and Linux app, packages it and attaches the packages to a GitHub
+# Release:
+#   - Windows: YTMusicfast-win-Setup.exe (per-user install) and -Portable.zip, with Velopack
+#     update packages (full and delta) and their feed, releases.win.json
+#   - Linux: YTMusicfast.AppImage, also updated by Velopack (releases.linux.json), and a Flatpak
+#     bundle, updated by Flatpak
+#
+# Pushing a tag desktop-v<version> (the version in desktop/Cargo.toml) publishes the release.
+# "Run workflow" builds the packages without publishing; with a draft tag it also puts them in a
+# draft release to try before tagging (delete the draft afterwards).
+#
+# Desktop releases are never marked "latest": the Mac app's updater reads the latest release
+# (releases/latest/download/appcast.xml), and the desktop updater looks for desktop-v* tags.
+
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+    inputs:
+      draft_tag:
+        description: Also put the packages in a draft release with this tag (desktop-v…); empty builds only
+        required: false
+        default: ""
+
+# Linux and Windows runner minutes are free for public repositories but billed (Windows at 2×) for
+# private ones, so while the repository is private only manual runs happen ("Run workflow" in the
+# Actions tab), as in ci.yml.
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # vpk, Velopack's packager, must be the version of the velopack crate in crates/ytm-update.
+  VPK_VERSION: 1.2.161
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  # electron/rcedit (MIT), to set the exe's icon and version information.
+  RCEDIT_URL: https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe
+  RCEDIT_SHA256: 3e7801db1a5edbec91b49a24a094aad776cb4515488ea5a4ca2289c400eade2a
+  # flatpak-builder-tools' Cargo.lock → Flatpak sources converter.
+  FLATPAK_CARGO_GENERATOR: https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/41c20aa10819cdb2a4f3ca171758a96d1955c018/cargo/flatpak-cargo-generator.py
+  FLATPAK_CARGO_GENERATOR_SHA256: 0a2db6be87d75910facef28ab46d4d6460802e8419ab850d0caa6a364d26b380
+
+jobs:
+  prepare:
+    name: Version
+    if: github.event_name == 'workflow_dispatch' || !github.event.repository.private
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+      draft: ${{ steps.version.outputs.draft }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - id: version
+        env:
+          DRAFT_TAG: ${{ inputs.draft_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source desktop/packaging/common.sh
+          version=$(workspace_version)
+          [[ -n "$version" ]] || { echo "::error::no version in desktop/Cargo.toml"; exit 1; }
+          publish=false draft=false tag=
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            tag=$GITHUB_REF_NAME publish=true
+            [[ "$tag" == "$TAG_PREFIX$version" ]] || {
+              echo "::error::tag $tag doesn't match the workspace version $version (expected $TAG_PREFIX$version)"
+              exit 1
+            }
+          elif [[ -n "$DRAFT_TAG" ]]; then
+            tag=$DRAFT_TAG draft=true
+            [[ "$tag" == "$TAG_PREFIX"* ]] || { echo "::error::draft tags start with $TAG_PREFIX"; exit 1; }
+            if gh release view "$tag" > /dev/null 2>&1; then
+              echo "::error::a release tagged $tag already exists"
+              exit 1
+            fi
+          fi
+
+          # The updater library and the packager must be the same Velopack version.
+          grep -q "velopack = { version = \"=$VPK_VERSION\"" desktop/crates/ytm-update/Cargo.toml || {
+            echo "::error::crates/ytm-update's velopack version isn't $VPK_VERSION (VPK_VERSION in this workflow)"
+            exit 1
+          }
+          # Software centers show the release history from the AppStream metadata.
+          if ! grep -q "<release version=\"$version\"" desktop/packaging/linux/$APP_ID.metainfo.xml; then
+            message="add <release version=\"$version\" date=\"…\"> to desktop/packaging/linux/$APP_ID.metainfo.xml"
+            if [[ $publish == true ]]; then echo "::error::$message"; exit 1; else echo "::warning::$message"; fi
+          fi
+          if [[ $publish == true && -z "$(release_notes "$version")" ]]; then
+            echo "::warning::no desktop/release-notes/$version.md: the release and the update show no notes"
+          fi
+
+          prerelease=false
+          [[ "$version" == *-* ]] && prerelease=true
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "publish=$publish"
+            echo "draft=$draft"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "Version $version, tag ${tag:-none}, publish $publish, draft $draft, prerelease $prerelease"
+
+  windows:
+    name: Windows
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    env:
+      # A published release must call ytm_update::startup(); test builds only warn.
+      REQUIRE_UPDATE_HOOK: ${{ needs.prepare.outputs.publish == 'true' && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Install libmpv
+        uses: ./.github/actions/libmpv-windows
+
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Build settings
+        # The C runtime is linked in, so people don't need the Visual C++ Redistributable, and
+        # build paths are remapped so none of this machine's folders end up in the binaries.
+        run: |
+          workspace=$(cygpath -w "$GITHUB_WORKSPACE")
+          home=$(cygpath -w "$HOME")
+          cargo_home=$(cygpath -w "${CARGO_HOME:-$HOME/.cargo}")
+          rustup_home=$(cygpath -w "${RUSTUP_HOME:-$HOME/.rustup}")
+          echo "RUSTFLAGS=-C target-feature=+crt-static --remap-path-prefix=$workspace=/build --remap-path-prefix=$cargo_home=/cargo --remap-path-prefix=$rustup_home=/rustup" >> "$GITHUB_ENV"
+          {
+            echo "BUILD_PATHS<<EOF"
+            printf '%s\n' "$workspace" "$home" "$cargo_home" "$rustup_home"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: desktop
+          shared-key: release
+
+      - name: Tests
+        run: cargo test --workspace --locked
+
+      - name: Release build
+        run: |
+          cargo build --release --locked -p ytmusicfast
+          if [[ -d crates/ytmusicfast-signin ]]; then cargo build --release --locked -p ytmusicfast-signin; fi
+
+      - name: Check the binaries
+        run: |
+          source packaging/common.sh
+          binaries=(target/release/ytmusicfast.exe)
+          [[ -f target/release/ytmusicfast-signin.exe ]] && binaries+=(target/release/ytmusicfast-signin.exe)
+          check_no_build_paths "${binaries[@]}"
+          for exe in "${binaries[@]}"; do
+            if grep -aqiE 'vcruntime140[_0-9]*\.dll|msvcp140[_0-9]*\.dll' "$exe"; then
+              echo "::error::$exe needs the Visual C++ Redistributable (link the C runtime statically)"
+              exit 1
+            fi
+          done
+
+      - uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install the packaging tools
+        run: |
+          dotnet tool install --global vpk --version "$VPK_VERSION"
+          cygpath -w "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/rcedit.exe" "$RCEDIT_URL"
+          echo "$RCEDIT_SHA256  $RUNNER_TEMP/rcedit.exe" | sha256sum -c -
+
+      - name: Previous release, for the delta update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: packaging/previous-release.sh win "$VERSION" "$RUNNER_TEMP/releases"
+
+      - name: Package
+        run: |
+          packaging/windows/package.sh --mpv-dir "$MPV_DIR" --rcedit "$RUNNER_TEMP/rcedit.exe" \
+            --releases "$RUNNER_TEMP/releases" --publish "$RUNNER_TEMP/publish"
+
+      - name: Check the packages
+        working-directory: ${{ runner.temp }}/publish
+        run: |
+          source "$GITHUB_WORKSPACE/desktop/packaging/common.sh"
+          version="${{ needs.prepare.outputs.version }}"
+          for file in "$PACK_ID-win-Setup.exe" "$PACK_ID-win-Portable.zip" "$PACK_ID-$version-full.nupkg" releases.win.json; do
+            [[ -f "$file" ]] || { echo "::error::missing $file"; exit 1; }
+          done
+          {
+            echo "### Windows packages"
+            echo '```'
+            ls -l
+            echo
+            echo "$PACK_ID-$version-full.nupkg:"
+            unzip -l "$PACK_ID-$version-full.nupkg"
+            echo
+            echo "releases.win.json:"
+            jq . releases.win.json
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          unzip -l "$PACK_ID-$version-full.nupkg" | grep -q 'lib/app/libmpv-2.dll' || { echo "::error::libmpv-2.dll isn't in the package"; exit 1; }
+          unzip -l "$PACK_ID-$version-full.nupkg" | grep -q 'lib/app/ytmusicfast.exe' || { echo "::error::ytmusicfast.exe isn't in the package"; exit 1; }
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: desktop-windows
+          path: ${{ runner.temp }}/publish/
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: Linux (AppImage)
+    needs: prepare
+    runs-on: ubuntu-latest
+    # Built on Debian 12, the oldest system the AppImage supports (glibc 2.36): its libmpv and
+    # what libmpv needs are bundled, and the binaries need nothing newer than that.
+    container: debian:bookworm-20261005
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    env:
+      REQUIRE_UPDATE_HOOK: ${{ needs.prepare.outputs.publish == 'true' && '1' || '' }}
+    steps:
+      - name: Install Debian packages
+        working-directory: /
+        # The build: compiler, libmpv and Slint's Linux libraries (as in desktop.yml). Packaging:
+        # patchelf, squashfs-tools, ICU for vpk (.NET), and the desktop and AppStream validators.
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git gcc libc6-dev pkg-config jq unzip file \
+            libmpv-dev libfontconfig-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            patchelf squashfs-tools libicu72 desktop-file-utils appstream
+
+      - uses: actions/checkout@v7.0.1
+
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Build settings
+        run: |
+          cargo_home=${CARGO_HOME:-$HOME/.cargo}
+          rustup_home=${RUSTUP_HOME:-$HOME/.rustup}
+          echo "RUSTFLAGS=--remap-path-prefix=$GITHUB_WORKSPACE=/build --remap-path-prefix=$cargo_home=/cargo --remap-path-prefix=$rustup_home=/rustup" >> "$GITHUB_ENV"
+          {
+            echo "BUILD_PATHS<<EOF"
+            printf '%s\n' "$GITHUB_WORKSPACE" "$HOME" "$cargo_home" "$rustup_home" /home/runner
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: desktop
+          shared-key: release-bookworm
+
+      - name: Tests
+        run: cargo test --workspace --locked
+
+      - name: Release build
+        run: |
+          cargo build --release --locked -p ytmusicfast
+          if [[ -d crates/ytmusicfast-signin ]]; then cargo build --release --locked -p ytmusicfast-signin; fi
+
+      - name: Check the binaries and the desktop files
+        run: |
+          source packaging/common.sh
+          binaries=(target/release/ytmusicfast)
+          [[ -f target/release/ytmusicfast-signin ]] && binaries+=(target/release/ytmusicfast-signin)
+          check_no_build_paths "${binaries[@]}"
+          desktop-file-validate "packaging/linux/$APP_ID.desktop"
+          appstreamcli validate --no-net --explain "packaging/linux/$APP_ID.metainfo.xml"
+
+      - uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install vpk
+        run: |
+          dotnet tool install --global vpk --version "$VPK_VERSION"
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Previous release, for the delta update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: packaging/previous-release.sh linux "$VERSION" "$RUNNER_TEMP/releases"
+
+      - name: Package
+        run: packaging/linux/package.sh --releases "$RUNNER_TEMP/releases" --publish "$RUNNER_TEMP/publish"
+
+      - name: Check the AppImage
+        working-directory: ${{ runner.temp }}
+        run: |
+          source "$GITHUB_WORKSPACE/desktop/packaging/common.sh"
+          version="${{ needs.prepare.outputs.version }}"
+          for file in "$PACK_ID.AppImage" "$PACK_ID-$version-linux-full.nupkg" releases.linux.json; do
+            [[ -f "publish/$file" ]] || { echo "::error::missing $file"; exit 1; }
+          done
+          rm -rf squashfs-root
+          "publish/$PACK_ID.AppImage" --appimage-extract > /dev/null
+          root=squashfs-root
+          # Velopack finds its updater and the app's manifest next to the binary.
+          for file in usr/bin/$MAIN_EXE usr/bin/UpdateNix usr/bin/sq.version usr/lib/libmpv.so.2 AppRun "$APP_ID.desktop"; do
+            [[ -e "$root/$file" ]] || { echo "::error::the AppImage has no $file"; exit 1; }
+          done
+          [[ "$(patchelf --print-rpath "$root/usr/bin/$MAIN_EXE")" == '$ORIGIN/../lib' ]] || { echo "::error::wrong RUNPATH"; exit 1; }
+          check_no_build_paths "$root/usr/bin/$MAIN_EXE"
+          # Everything the bundled libraries need is bundled or one of the system's libraries.
+          mapfile -t excluded < <(sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$GITHUB_WORKSPACE/desktop/packaging/linux/excludelist" | grep -v '^$')
+          for lib in "$root"/usr/lib/*; do
+            for needed in $(patchelf --print-needed "$lib"); do
+              [[ -e "$root/usr/lib/$needed" ]] && continue
+              printf '%s\n' "${excluded[@]}" | grep -qxF "$needed" && continue
+              echo "::error::$(basename "$lib") needs $needed, which is neither bundled nor a system library"
+              exit 1
+            done
+          done
+          desktop-file-validate "$root/$APP_ID.desktop"
+          {
+            echo "### Linux packages"
+            echo '```'
+            ls -l publish
+            echo
+            echo "AppImage contents:"
+            (cd "$root" && find . -type f -o -type l | sort)
+            echo
+            echo "Bundled libraries: $(ls "$root/usr/lib" | wc -l), $(du -sh "$root/usr/lib" | cut -f1)"
+            echo
+            echo "releases.linux.json:"
+            jq . publish/releases.linux.json
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: desktop-linux
+          path: ${{ runner.temp }}/publish/
+          if-no-files-found: error
+          retention-days: 7
+
+  appimage-smoke-test:
+    name: AppImage on ${{ matrix.name }}
+    needs: [prepare, linux]
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Libraries the AppImage takes from the system (packaging/linux/excludelist), as a
+        # desktop install of each distribution has them, and Python for the test.
+        include:
+          - name: Debian 12
+            image: debian:bookworm-20261005-slim
+            install: >-
+              apt-get update && apt-get install -y --no-install-recommends python3 libgl1 libegl1
+              libx11-6 libx11-xcb1 libxcb1 libwayland-client0 libasound2 libfontconfig1 libfreetype6
+              libharfbuzz0b libfribidi0 libpipewire-0.3-0 libjack-jackd2-0 libgmp10 libdrm2 libgbm1
+              libexpat1 zlib1g libstdc++6 libuuid1 libusb-1.0-0 libgpg-error0 libcom-err2 libice6 libsm6
+          - name: Ubuntu 24.04
+            image: ubuntu:24.04
+            install: >-
+              apt-get update && apt-get install -y --no-install-recommends python3 libgl1 libegl1
+              libx11-6 libx11-xcb1 libxcb1 libwayland-client0 libasound2t64 libfontconfig1 libfreetype6
+              libharfbuzz0b libfribidi0 libpipewire-0.3-0t64 libjack-jackd2-0 libgmp10 libdrm2 libgbm1
+              libexpat1 zlib1g libstdc++6 libuuid1 libusb-1.0-0 libgpg-error0 libcom-err2 libice6 libsm6
+          - name: Fedora
+            image: fedora:latest
+            install: >-
+              dnf install -y python3 mesa-libGL mesa-libEGL libglvnd-opengl libX11 libX11-xcb libxcb
+              libwayland-client alsa-lib fontconfig freetype harfbuzz fribidi pipewire-libs
+              pipewire-jack-audio-connection-kit-libs gmp libdrm mesa-libgbm expat zlib-ng-compat
+              libstdc++ libuuid libusb1 libgpg-error libcom_err libICE libSM
+          - name: Arch Linux
+            image: archlinux:latest
+            install: >-
+              pacman -Syu --noconfirm python mesa libglvnd libx11 libxcb wayland alsa-lib fontconfig
+              freetype2 harfbuzz fribidi libpipewire pipewire-jack gmp libdrm expat zlib gcc-libs
+              util-linux-libs libusb libgpg-error e2fsprogs libice libsm
+    steps:
+      - name: Install the system libraries
+        run: ${{ matrix.install }}
+
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: desktop-linux
+          path: publish
+
+      - uses: actions/checkout@v7.0.1
+        with:
+          path: source
+
+      - name: libmpv from the AppImage
+        shell: bash
+        run: |
+          chmod +x publish/YTMusicfast.AppImage
+          publish/YTMusicfast.AppImage --appimage-extract > /dev/null
+          if ldd squashfs-root/usr/lib/*.so* squashfs-root/usr/bin/ytmusicfast | grep 'not found'; then
+            echo "::error::libraries missing on ${{ matrix.name }}"
+            exit 1
+          fi
+          python3 -I source/desktop/packaging/linux/libmpv-smoke-test.py squashfs-root/usr/lib
+
+  flatpak:
+    name: Linux (Flatpak)
+    needs: prepare
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
+      options: --privileged
+    timeout-minutes: 90
+    env:
+      MANIFEST: desktop/packaging/flatpak/io.github.mijaelfv.YTMusicfast.yml
+      APP_ID: io.github.mijaelfv.YTMusicfast
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Cargo sources for the offline build
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/flatpak-cargo-generator.py" "$FLATPAK_CARGO_GENERATOR"
+          echo "$FLATPAK_CARGO_GENERATOR_SHA256  $RUNNER_TEMP/flatpak-cargo-generator.py" | sha256sum -c -
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet aiohttp tomlkit
+          "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/flatpak-cargo-generator.py" desktop/Cargo.lock \
+            -o desktop/packaging/flatpak/cargo-sources.json
+
+      - uses: actions/cache@v6.1.0
+        with:
+          path: .flatpak-builder
+          key: flatpak-${{ hashFiles('desktop/packaging/flatpak/*.yml') }}-${{ hashFiles('desktop/Cargo.lock') }}
+          restore-keys: flatpak-${{ hashFiles('desktop/packaging/flatpak/*.yml') }}-
+
+      - name: Build
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak-builder --user --install-deps-from=flathub --disable-rofiles-fuse --ccache \
+            --force-clean --repo=repo build "$MANIFEST"
+          version="${{ needs.prepare.outputs.version }}"
+          mkdir -p publish
+          flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+            repo "publish/YTMusicfast-$version-x86_64.flatpak" "$APP_ID"
+
+      - name: Check the Flatpak
+        run: |
+          source desktop/packaging/common.sh
+          BUILD_PATHS=$(printf '%s\n' "$GITHUB_WORKSPACE" "$HOME" /home/runner /run/build)
+          export BUILD_PATHS
+          check_no_build_paths build/files/bin/ytmusicfast
+          desktop-file-validate "build/files/share/applications/$APP_ID.desktop"
+          appstreamcli validate --no-net --explain "build/files/share/metainfo/$APP_ID.metainfo.xml"
+          # libmpv and its decoders work inside the runtime.
+          flatpak install --user -y --noninteractive "publish/YTMusicfast-${{ needs.prepare.outputs.version }}-x86_64.flatpak"
+          dbus-run-session -- flatpak run --command=python3 \
+            --filesystem="$GITHUB_WORKSPACE/desktop/packaging/linux:ro" "$APP_ID" \
+            -I "$GITHUB_WORKSPACE/desktop/packaging/linux/libmpv-smoke-test.py" /app/lib
+          {
+            echo "### Flatpak"
+            echo '```'
+            ls -l publish
+            echo
+            (cd build/files && find . -type f -o -type l | sort)
+            echo
+            cat build/metadata
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Flathub linter
+        # Informational: the manifest's `dir` source is meant for this repository; Flathub's copy
+        # uses a git source.
+        continue-on-error: true
+        run: |
+          flatpak-builder-lint --exceptions manifest "$MANIFEST" || true
+          flatpak-builder-lint --exceptions repo repo
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: desktop-flatpak
+          path: publish/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: GitHub Release
+    needs: [prepare, windows, linux, appimage-smoke-test, flatpak]
+    if: needs.prepare.outputs.publish == 'true' || needs.prepare.outputs.draft == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: desktop-*
+          path: artifacts
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          DRAFT: ${{ needs.prepare.outputs.draft }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          source desktop/packaging/common.sh
+          # Windows and Linux files share the release: their names must not collide.
+          duplicates=$(find artifacts -type f -printf '%f\n' | sort | uniq -d)
+          [[ -z "$duplicates" ]] || { echo "::error::files with the same name: $duplicates"; exit 1; }
+
+          notes="$RUNNER_TEMP/notes.md"
+          {
+            if [[ -n "$(release_notes "$VERSION")" ]]; then cat "$(release_notes "$VERSION")"; echo; fi
+            echo "## Install"
+            echo
+            echo "- **Windows 10 and 11**: download **$PACK_ID-win-Setup.exe** and run it. It installs for you"
+            echo "  alone (no administrator rights) and updates itself. Windows may say it protected your PC:"
+            echo "  choose **More info → Run anyway** (the installer isn't code-signed)."
+            echo "- **Linux, AppImage**: download **$PACK_ID.AppImage**, make it executable"
+            echo "  (\`chmod +x $PACK_ID.AppImage\`) and open it. It updates itself. Needs glibc 2.36 or later"
+            echo "  (Debian 12, Ubuntu 23.04, Fedora 37 or newer)."
+            echo "- **Linux, Flatpak**: \`flatpak install --user $PACK_ID-$VERSION-x86_64.flatpak\`."
+            echo
+            echo "The other files are what the apps download to update themselves."
+          } > "$notes"
+
+          flags=(--title "$PACK_TITLE $VERSION for Windows and Linux" --notes-file "$notes" --latest=false)
+          [[ "$PRERELEASE" == true ]] && flags+=(--prerelease)
+          if [[ "$DRAFT" == true ]]; then
+            flags+=(--draft --target "$GITHUB_SHA")
+          else
+            flags+=(--verify-tag)
+          fi
+          gh release create "$TAG" "${flags[@]}" artifacts/*/*
+          gh release view "$TAG" --json url,isDraft,isPrerelease,assets \
+            --jq '{url, isDraft, isPrerelease, assets: [.assets[] | {name, size}]}' | tee -a "$GITHUB_STEP_SUMMARY"
