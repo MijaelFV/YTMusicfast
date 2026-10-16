@@ -360,6 +360,9 @@ jobs:
               exit 1
             done
           done
+          # ...and every symbol they use is there, as the AppImage loads them (no LD_LIBRARY_PATH).
+          undefined=$(env -u LD_LIBRARY_PATH ldd -r "$root"/usr/lib/* "$root/usr/bin/$MAIN_EXE" 2>&1 | grep 'undefined symbol' || true)
+          [[ -z "$undefined" ]] || { echo "::error::undefined symbols:"; echo "$undefined"; exit 1; }
           desktop-file-validate "$root/$APP_ID.desktop"
           {
             echo "### Linux packages"

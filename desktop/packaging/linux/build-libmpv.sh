@@ -47,7 +47,7 @@ tar -xf "$work/ffmpeg.tar.xz" -C "$work"
   install -D -m 644 COPYING.LGPLv2.1 LICENSE.md -t "$prefix/share/doc/ffmpeg"
 )
 
-echo "==> libplacebo (linked into libmpv)"
+echo "==> libplacebo"
 git clone --quiet --depth 1 --branch v7.360.1 --recurse-submodules --shallow-submodules \
   https://github.com/haasn/libplacebo.git "$work/libplacebo"
 [[ "$(git -C "$work/libplacebo" rev-parse HEAD)" == cee9b076f2c63104ccfd497fa79c39a867293ec4 ]] || {
@@ -55,9 +55,10 @@ git clone --quiet --depth 1 --branch v7.360.1 --recurse-submodules --shallow-sub
   exit 1
 }
 "$meson" setup "$work/libplacebo/build" "$work/libplacebo" --prefix="$prefix" --libdir=lib \
-  --buildtype=release -Ddefault_library=static -Dauto_features=disabled -Dopengl=enabled \
-  -Ddemos=false -Dtests=false
-"$meson" install -C "$work/libplacebo/build" --quiet
+  --buildtype=release -Dauto_features=disabled -Dopengl=enabled -Ddemos=false -Dtests=false
+# Shared: it's partly C++, and as a static library linked into libmpv (C) nothing would bring in
+# the C++ runtime it needs.
+"$meson" install -C "$work/libplacebo/build" --quiet --strip
 install -D -m 644 "$work/libplacebo/LICENSE" -t "$prefix/share/doc/libplacebo"
 
 echo "==> mpv"
@@ -72,7 +73,7 @@ tar -xzf "$work/mpv.tar.gz" -C "$work"
 install -D -m 644 "$work/mpv-0.41.0/LICENSE.LGPL" "$work/mpv-0.41.0/Copyright" -t "$prefix/share/doc/mpv"
 
 # Only what the app loads at run time and links against.
-rm -rf "$prefix/share/ffmpeg" "$prefix/lib"/*.a "$prefix/share/applications" "$prefix/share/icons" \
+rm -rf "$prefix/share/ffmpeg" "$prefix/share/applications" "$prefix/share/icons" \
   "$prefix/share/zsh" "$prefix/share/bash-completion"
 echo "==> libmpv in $prefix/lib:"
 ls -l "$prefix/lib"

@@ -68,13 +68,25 @@ bundle() {  # name, path
   bundled+=("$2")
 }
 bundle libmpv.so.2 "$libmpv"
-# ldd lists the whole dependency tree of each binary.
-for root in "$appdir/usr/bin/$MAIN_EXE" "$libmpv"; do
+# Follow the dependencies of what is bundled, not of the system's libraries: those bring their own
+# (GLib for HarfBuzz, libXau for libxcb…), and copies of them here would only be dead weight.
+queue=("$appdir/usr/bin/$MAIN_EXE" "$libmpv")
+while [[ ${#queue[@]} -gt 0 ]]; do
+  file=${queue[0]}
+  queue=("${queue[@]:1}")
+  unset found
+  declare -A found=()  # soname -> path, as the dynamic loader resolves them
   while read -r name arrow path _; do
-    [[ "$arrow" == "=>" ]] || continue  # the vDSO and the dynamic loader
-    [[ "$path" == /* ]] || { echo "::error::$name, needed by $(basename "$root"), isn't installed" >&2; exit 1; }
-    is_excluded "$name" || bundle "$name" "$path"
-  done < <(ldd "$root")
+    [[ "$arrow" == "=>" ]] && found[$name]=$path
+  done < <(ldd "$file")
+  for name in $(patchelf --print-needed "$file"); do
+    is_excluded "$name" && continue
+    [[ -e "$appdir/usr/lib/$name" ]] && continue
+    path=${found[$name]:-}
+    [[ "$path" == /* ]] || { echo "::error::$name, needed by $(basename "$file"), isn't installed" >&2; exit 1; }
+    bundle "$name" "$path"
+    queue+=("$path")
+  done
 done
 
 # Each binary finds the bundled libraries next to it (RUNPATH), and each library finds its own
