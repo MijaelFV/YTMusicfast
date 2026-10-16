@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata: what software centers (GNOME Software, Discover, Flathub) show.
+     Add a <release> for every version before tagging it; the release workflow checks. -->
+<component type="desktop-application">
+  <id>io.github.mijaelfv.YTMusicfast</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>YT Musicfast</name>
+  <summary>A fast, native app for YouTube Music</summary>
+  <developer id="io.github.mijaelfv">
+    <name>MijaelFV</name>
+  </developer>
+
+  <description>
+    <p>
+      YT Musicfast plays YouTube Music in a light, native app instead of a browser tab.
+    </p>
+    <ul>
+      <li>Your mixes, Liked Music, playlists and history, in step with your phone and the website</li>
+      <li>Search, Home and Explore, albums, artists and charts</li>
+      <li>Songs and music videos, synced lyrics and an editable queue</li>
+      <li>Media keys and your desktop's media controls</li>
+    </ul>
+    <p>
+      An independent project, not affiliated with, endorsed or sponsored by Google or YouTube. It
+      uses YouTube Music's private web API, which can change without notice.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.mijaelfv.YTMusicfast.desktop</launchable>
+  <provides>
+    <binary>ytmusicfast</binary>
+  </provides>
+
+  <url type="homepage">https://github.com/MijaelFV/YTMusicfast</url>
+  <url type="bugtracker">https://github.com/MijaelFV/YTMusicfast/issues</url>
+  <url type="vcs-browser">https://github.com/MijaelFV/YTMusicfast</url>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#f2524a</color>
+    <color type="primary" scheme_preference="dark">#5c1512</color>
+  </branding>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.1.0" date="2026-10-16">
+      <description>
+        <p>The first version for Windows and Linux.</p>
+      </description>
+    </release>
+  </releases>
+</component>

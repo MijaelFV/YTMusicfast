@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=YT Musicfast
+GenericName=Music Player
+Comment=A fast, native app for YouTube Music
+Icon=io.github.mijaelfv.YTMusicfast
+Exec=ytmusicfast
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=YouTube;Music;Songs;Playlists;Lyrics;
+StartupNotify=true
+StartupWMClass=ytmusicfast
+SingleMainWindow=true

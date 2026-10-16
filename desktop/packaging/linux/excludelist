@@ -1,0 +1,59 @@
+# Libraries an AppImage takes from the system instead of bundling them: the C library, the GPU
+# drivers' GL/EGL/DRM stack, the display server's client libraries, the sound server's and the
+# font stack, which must match the running system (or are on every system and ABI-stable).
+# From AppImageCommunity/pkg2appimage, commit 19e30b276ffedf4d3b4b56bc6320f463625a74f8 (excludelist);
+# read by package.sh: one library name per line, '#' starts a comment.
+
+ld-linux.so.2
+ld-linux-x86-64.so.2
+libanl.so.1
+libBrokenLocale.so.1
+libcidn.so.1
+libc.so.6
+libdl.so.2
+libm.so.6
+libmvec.so.1
+libnss_compat.so.2
+libnss_dns.so.2
+libnss_files.so.2
+libnss_hesiod.so.2
+libnss_nisplus.so.2
+libnss_nis.so.2
+libpthread.so.0
+libresolv.so.2
+librt.so.1
+libthread_db.so.1
+libutil.so.1
+libstdc++.so.6
+libGL.so.1
+libEGL.so.1
+libGLdispatch.so.0
+libGLX.so.0
+libOpenGL.so.0
+libdrm.so.2
+libglapi.so.0
+libgbm.so.1
+libxcb.so.1
+libX11.so.6
+libX11-xcb.so.1
+libwayland-client.so.0
+libasound.so.2
+libfontconfig.so.1
+libfreetype.so.6
+libharfbuzz.so.0
+libcom_err.so.2
+libexpat.so.1
+libgcc_s.so.1
+libgpg-error.so.0
+libICE.so.6
+libSM.so.6
+libusb-1.0.so.0
+libuuid.so.1
+libz.so.1
+libgpg-error.so.0
+libjack.so.0
+libpipewire-0.3.so.0
+libxcb-dri3.so.0 # https://github.com/AppImage/AppImages/issues/348
+libxcb-dri2.so.0 # https://github.com/probonopd/linuxdeployqt/issues/331#issuecomment-442276277
+libfribidi.so.0 # https://github.com/olive-editor/olive/issues/221 and https://github.com/knapsu/plex-media-player-appimage/issues/14
+libgmp.so.10
