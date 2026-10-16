@@ -8,3 +8,4 @@ test.log
 dist/
 build-release.log
 .claude/
+desktop/target/
