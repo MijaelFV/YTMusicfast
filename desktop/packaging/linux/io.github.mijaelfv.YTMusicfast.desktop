@@ -9,5 +9,3 @@ Terminal=false
 Categories=AudioVideo;Audio;Player;
 Keywords=YouTube;Music;Songs;Playlists;Lyrics;
 StartupNotify=true
-StartupWMClass=ytmusicfast
-SingleMainWindow=true
