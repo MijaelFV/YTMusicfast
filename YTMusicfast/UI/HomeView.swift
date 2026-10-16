@@ -278,8 +278,11 @@ struct QuickTile: View {
                 .foregroundStyle(Theme.text)
                 .lineLimit(2)
             Spacer(minLength: 4)
-            if hovering {
-                PlayCircleButton(size: 32, action: play)
+            let state = PlayerController.shared.playState(of: item.target)
+            if hovering || state == .loading || state == .playing {
+                PlayCircleButton(size: 32, isPlaying: state == .playing, loading: state == .loading) {
+                    if state == .playing || state == .paused { PlayerController.shared.togglePlayPause() } else { play() }
+                }
                     .padding(.trailing, 8)
                     .transition(.opacity)
             }

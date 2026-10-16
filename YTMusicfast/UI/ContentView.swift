@@ -1145,8 +1145,9 @@ struct LibraryGridTile: View {
                 .aspectRatio(1, contentMode: .fit)
                 // The round play button on the hovered card.
                 .overlay(alignment: .bottomTrailing) {
-                    if hovering, item.target.kind != .other {
-                        PlayCircleButton(size: 36, isPlaying: playingThis && player.isPlaying) {
+                    let state = player.playState(of: item.target)
+                    if hovering || state == .loading || state == .playing, item.target.kind != .other {
+                        PlayCircleButton(size: 36, isPlaying: state == .playing, loading: state == .loading) {
                             if playingThis { player.togglePlayPause() } else { player.playCollection(item.target, playlistId: item.playlistId) }
                         }
                         .padding(6)
@@ -1375,15 +1376,8 @@ struct LibraryRow: View {
             ArtworkView(url: thumbnail, size: 48, cornerRadius: 4, circle: circle)
                 .overlay {
                     // Hovering the artwork offers to play without opening the page.
-                    if hovering, let target {
-                        ZStack {
-                            (circle ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: 4))).fill(.black.opacity(0.5))
-                            Image(systemName: isPlayingFrom && player.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 18))
-                                .foregroundStyle(.white)
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture {
+                    if let target {
+                        CoverPlayOverlay(visible: hovering, state: player.playState(of: target), circle: circle, glyphSize: 18) {
                             if isPlayingFrom { player.togglePlayPause() } else { player.playCollection(target, playlistId: playlistId) }
                         }
                     }

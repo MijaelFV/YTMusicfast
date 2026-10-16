@@ -1211,6 +1211,7 @@ struct TrackRow: View {
     }
 
     private var isCurrent: Bool { player.current?.videoId == track.videoId }
+    private var playState: PlayerController.ItemPlayState { player.playState(of: track) }
 
     var body: some View {
         HStack(spacing: 16) {
@@ -1218,7 +1219,9 @@ struct TrackRow: View {
                 ZStack {
                     if hovering {
                         playToggle
-                    } else if isCurrent, player.isPlaying {
+                    } else if playState == .loading {
+                        ProgressView().controlSize(.small)
+                    } else if playState == .playing {
                         EqualizerBars(animating: true)
                     } else if numbered {
                         Text("\(index + 1)")
@@ -1235,9 +1238,15 @@ struct TrackRow: View {
                     ArtworkView(url: track.thumbnail, size: 40, cornerRadius: 4)
                         .overlay {
                             // Without a number column, the play affordance sits on the artwork.
-                            if !numbered, hovering || (isCurrent && player.isPlaying) {
+                            if !numbered, hovering || playState == .loading || playState == .playing {
                                 RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.5))
-                                if hovering { playToggle } else { EqualizerBars(animating: true) }
+                                if hovering {
+                                    playToggle
+                                } else if playState == .loading {
+                                    ProgressView().controlSize(.small).tint(.white)
+                                } else {
+                                    EqualizerBars(animating: true)
+                                }
                             }
                         }
                 }
@@ -1375,8 +1384,13 @@ struct TrackRow: View {
     /// a big target, not just the small glyph — clicking beside the glyph used to select the row instead.
     private var playToggle: some View {
         Button { isCurrent ? player.togglePlayPause() : play() } label: {
-            Image(systemName: isCurrent && player.isPlaying ? "pause.fill" : "play.fill")
-                .font(.system(size: 13))
+            Group {
+                if playState == .loading {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: playState == .playing ? "pause.fill" : "play.fill").font(.system(size: 13))
+                }
+            }
                 .foregroundStyle(Theme.text)
                 .frame(width: numbered || !showArtwork ? max(numberWidth, 24) : 40, height: 40)
                 .contentShape(Rectangle())
@@ -1387,22 +1401,29 @@ struct TrackRow: View {
 }
 
 /// ▶ over a cover while hovered (⏸ when it's what's playing). The whole cover is the
-/// button. Nothing is built while not hovered.
+/// button. Not hovered, it shows only what's going on: a spinner from the click until the sound
+/// starts, moving bars while it plays. Nothing is built otherwise.
 struct CoverPlayOverlay: View {
     var visible: Bool
-    var playing = false
+    var state: PlayerController.ItemPlayState = .idle
     var circle = false
     var cornerRadius: CGFloat = 4
     var glyphSize: CGFloat = 16
     var action: () -> Void
 
     var body: some View {
-        if visible {
+        if visible || state == .loading || state == .playing {
             ZStack {
                 (circle ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))).fill(.black.opacity(0.5))
-                Image(systemName: playing ? "pause.fill" : "play.fill")
-                    .font(.system(size: glyphSize))
-                    .foregroundStyle(.white)
+                if state == .loading {
+                    ProgressView().controlSize(.small).tint(.white)
+                } else if visible {
+                    Image(systemName: state == .playing ? "pause.fill" : "play.fill")
+                        .font(.system(size: glyphSize))
+                        .foregroundStyle(.white)
+                } else {
+                    EqualizerBars(animating: true)
+                }
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: action)
@@ -1465,9 +1486,13 @@ struct MediaCard: View {
             ArtworkView(url: thumbnail, size: size, cornerRadius: 6, circle: isArtist)
                 .shadow(color: .black.opacity(0.45), radius: 10, y: 6)
                 .overlay(alignment: .bottomTrailing) {
-                    // Only while hovering: a hidden button still costs a hover region and a shadow.
-                    if canPlay, engaged {
-                        PlayCircleButton(size: 46, action: play)
+                    // Only while hovering (or starting, or playing): a hidden button still costs a
+                    // hover region and a shadow.
+                    let state = cardPlayState
+                    if canPlay, engaged || state == .loading || state == .playing {
+                        PlayCircleButton(size: 46, isPlaying: state == .playing, loading: state == .loading) {
+                            if state == .playing || state == .paused { PlayerController.shared.togglePlayPause() } else { play() }
+                        }
                             .padding(8)
                             .transition(.opacity.combined(with: .offset(y: 8)))
                     }
@@ -1515,6 +1540,13 @@ struct MediaCard: View {
         switch item {
         case .track: play()
         case .media(let m): router.open(m.target)
+        }
+    }
+
+    private var cardPlayState: PlayerController.ItemPlayState {
+        switch item {
+        case .track(let track): PlayerController.shared.playState(of: track)
+        case .media(let m): PlayerController.shared.playState(of: m.target)
         }
     }
 
@@ -1783,7 +1815,7 @@ struct MediaRow: View {
         HStack(spacing: 12) {
             ArtworkView(url: item.thumbnail, size: 48, cornerRadius: 4, circle: item.target.kind == .artist)
                 .overlay {
-                    CoverPlayOverlay(visible: hovering && item.target.kind != .other, playing: playingThis && player.isPlaying,
+                    CoverPlayOverlay(visible: hovering && item.target.kind != .other, state: player.playState(of: item.target),
                                      circle: item.target.kind == .artist) {
                         if playingThis { player.togglePlayPause() } else { player.playCollection(item.target, playlistId: item.playlistId) }
                     }

@@ -294,12 +294,20 @@ extension View {
 struct PlayCircleButton: View {
     var size: CGFloat = 52
     var isPlaying = false
+    /// Started and not sounding yet: a spinner in place of the glyph.
+    var loading = false
     var action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            PlayPauseGlyph(isPlaying: isPlaying, diameter: size)
+            Group {
+                if loading {
+                    ProgressView().controlSize(size >= 44 ? .regular : .small).tint(.black)
+                } else {
+                    PlayPauseGlyph(isPlaying: isPlaying, diameter: size)
+                }
+            }
                 .foregroundStyle(.black)
                 .frame(width: size, height: size)
                 .background(Circle().fill(Theme.accent))

@@ -1111,7 +1111,12 @@ private struct RelatedTrackRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ArtworkView(url: track.thumbnail, size: 44, cornerRadius: 4)
-                .overlay { CoverPlayOverlay(visible: hovering) { player.playRadio(from: track) } }
+                .overlay {
+                    let state = player.playState(of: track)
+                    CoverPlayOverlay(visible: hovering, state: state) {
+                        if state == .idle { player.playRadio(from: track) } else { player.togglePlayPause() }
+                    }
+                }
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title).font(.system(size: 14, weight: .medium)).lineLimit(1)
                 Text(track.artistLine).font(.system(size: 12)).foregroundStyle(Theme.secondary).lineLimit(1)
@@ -1177,7 +1182,7 @@ struct QueueRow: View {
                 .overlay {
                     // Static on purpose: an animated symbol inside a List redraws the whole list
                     // every frame (~20% CPU while playing).
-                    if isCurrent, !engaged {
+                    if isCurrent, !engaged, !player.isBuffering {
                         RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.45))
                         Image(systemName: player.isPlaying ? "speaker.wave.2.fill" : "speaker.fill")
                             .font(.system(size: 13))
@@ -1186,7 +1191,11 @@ struct QueueRow: View {
                 }
                 // Hovered: ▶ plays it (⏸ / ▶ on the song that's playing).
                 .overlay {
-                    CoverPlayOverlay(visible: engaged, playing: isCurrent && player.isPlaying) {
+                    // Not hovered, only the spinner while it starts (the speaker above marks it after):
+                    // moving bars here would redraw the whole list every frame.
+                    let state: PlayerController.ItemPlayState = !isCurrent ? .idle
+                        : player.isBuffering ? .loading : player.isPlaying ? .playing : .paused
+                    CoverPlayOverlay(visible: engaged, state: engaged || state == .loading ? state : .idle) {
                         if isCurrent { player.togglePlayPause() } else if isHistory { player.playRadio(from: entry.track) } else { player.jump(to: entry) }
                     }
                 }

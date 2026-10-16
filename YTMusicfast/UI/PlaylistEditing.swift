@@ -108,11 +108,14 @@ struct FinderRow: View {
             ArtworkView(url: track.thumbnail, size: 40, cornerRadius: 4)
                 .overlay {
                     // A play button on the cover while hovering, bars while it plays.
-                    if hovering || (isCurrent && player.isPlaying) {
+                    let state = player.playState(of: track)
+                    if hovering || state == .loading || state == .playing {
                         RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.5))
-                        if hovering {
+                        if state == .loading {
+                            ProgressView().controlSize(.small).tint(.white)
+                        } else if hovering {
                             Button(action: play) {
-                                Image(systemName: isCurrent && player.isPlaying ? "pause.fill" : "play.fill")
+                                Image(systemName: state == .playing ? "pause.fill" : "play.fill")
                                     .font(.system(size: 13))
                                     .foregroundStyle(Theme.text)
                                     .frame(width: 40, height: 40)

@@ -549,7 +549,10 @@ struct TopResultBanner: View {
             }
             Spacer(minLength: 16)
             if canPlay {
-                PlayCircleButton(size: 56, action: play)
+                let state = playState
+                PlayCircleButton(size: 56, isPlaying: state == .playing, loading: state == .loading) {
+                    if state == .playing || state == .paused { PlayerController.shared.togglePlayPause() } else { play() }
+                }
             }
         }
         .padding(24)
@@ -583,6 +586,13 @@ struct TopResultBanner: View {
         }
     }
 
+    private var playState: PlayerController.ItemPlayState {
+        switch item {
+        case .track(let track): PlayerController.shared.playState(of: track)
+        case .media(let media): PlayerController.shared.playState(of: media.target)
+        }
+    }
+
     private func play() {
         RecentSearches.add(item)
         switch item {
@@ -607,10 +617,13 @@ struct SearchResultRow: View {
                 let current = player.current?.videoId == track.videoId
                 ArtworkView(url: track.thumbnail, size: 48, cornerRadius: 4)
                     .overlay {
-                        if hovering || (current && player.isPlaying) {
+                        let state = player.playState(of: track)
+                        if hovering || state == .loading || state == .playing {
                             RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.5))
-                            if hovering {
-                                Image(systemName: current && player.isPlaying ? "pause.fill" : "play.fill")
+                            if state == .loading {
+                                ProgressView().controlSize(.small).tint(.white)
+                            } else if hovering {
+                                Image(systemName: state == .playing ? "pause.fill" : "play.fill")
                                     .font(.system(size: 16)).foregroundStyle(.white)
                             } else {
                                 EqualizerBars(animating: true)

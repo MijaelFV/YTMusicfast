@@ -833,7 +833,7 @@ struct EpisodeHeader: View {
             }
             HStack(spacing: 16) {
                 let current = player.current?.videoId == videoId
-                PlayCircleButton(size: 56, isPlaying: current && player.isPlaying) {
+                PlayCircleButton(size: 56, isPlaying: current && player.isPlaying, loading: current && player.isBuffering) {
                     if current { player.togglePlayPause() } else { player.play([episode]) }
                 }
                 if let resume = player.resumePosition(for: episode) {
@@ -950,7 +950,8 @@ struct ActionBar: View {
     var body: some View {
         HStack(spacing: 20) {
             if !tracks.isEmpty {
-                PlayCircleButton(size: 56, isPlaying: playingHere) { player.playOrToggle(tracks, from: target) }
+                let state = player.playState(of: target)
+                PlayCircleButton(size: 56, isPlaying: state == .playing, loading: state == .loading) { player.playOrToggle(tracks, from: target) }
                 IconButton(systemImage: "shuffle", size: 26, label: String(localized: "Shuffle play")) {
                     player.play(tracks, shuffled: true, from: target)
                 }
@@ -1089,7 +1090,8 @@ struct StickyHeader: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            PlayCircleButton(size: 40, isPlaying: player.isPlaying && player.isPlaying(from: target)) {
+            let state = player.playState(of: target)
+            PlayCircleButton(size: 40, isPlaying: state == .playing, loading: state == .loading) {
                 player.playOrToggle(tracks, from: target)
             }
                 .disabled(tracks.isEmpty)

@@ -567,6 +567,26 @@ final class PlayerController {
         playingContext?.browseId == target.browseId
     }
 
+    /// What a song's or collection's play button shows: loading from the click until the sound
+    /// starts, then pause while it plays (and play again when paused), like the player bar.
+    enum ItemPlayState { case idle, loading, playing, paused }
+
+    /// The album, playlist or artist a click is starting, while its songs load.
+    private(set) var startingBrowseId: String?
+
+    func playState(of track: Track) -> ItemPlayState {
+        guard current?.videoId == track.videoId || currentSong?.videoId == track.videoId else { return .idle }
+        if isBuffering { return .loading }
+        return isPlaying ? .playing : .paused
+    }
+
+    func playState(of target: BrowseTarget) -> ItemPlayState {
+        if startingBrowseId == target.browseId { return .loading }
+        guard isPlaying(from: target) else { return .idle }
+        if isBuffering { return .loading }
+        return isPlaying ? .playing : .paused
+    }
+
     /// A page's big Play button: pause or resume when the page is already what's playing, else start it.
     func playOrToggle(_ tracks: [Track], from target: BrowseTarget) {
         if isPlaying(from: target) { togglePlayPause() } else { play(tracks, from: target) }
@@ -576,6 +596,7 @@ final class PlayerController {
     /// shuffle stays on): the chosen song plays first and the rest are shuffled behind it.
     func play(_ tracks: [Track], startAt index: Int = 0, shuffled: Bool? = nil, from context: BrowseTarget? = nil) {
         latestRequest += 1
+        startingBrowseId = nil
         startQueue(tracks, startAt: index, shuffled: shuffled, from: context)
     }
 
@@ -682,8 +703,12 @@ final class PlayerController {
         let request = latestRequest
         // The songs load first: the top bar's spinner shows the click was taken, and a failure says so.
         Activity.shared.begin(.starting)
+        startingBrowseId = target.browseId
         Task {
-            defer { Activity.shared.end(.starting) }
+            defer {
+                Activity.shared.end(.starting)
+                if request == latestRequest { startingBrowseId = nil }
+            }
             let page: BrowsePage
             do {
                 page = try await MusicAPI.browse(target)
@@ -705,8 +730,12 @@ final class PlayerController {
         latestRequest += 1
         let request = latestRequest
         Activity.shared.begin(.starting)
+        startingBrowseId = context?.browseId
         Task {
-            defer { Activity.shared.end(.starting) }
+            defer {
+                Activity.shared.end(.starting)
+                if request == latestRequest { startingBrowseId = nil }
+            }
             do {
                 let result = try await MusicAPI.radio(playlistId: playlistId, params: params)
                 guard request == latestRequest else { return }

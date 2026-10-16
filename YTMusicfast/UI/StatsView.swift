@@ -119,7 +119,8 @@ struct StatsView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 16) {
                 SectionHeader(title: String(localized: "Top songs"), label: range.title)
-                PlayCircleButton(size: 44, isPlaying: PlayerController.shared.isPlaying(from: Self.target) && PlayerController.shared.isPlaying) {
+                let state = PlayerController.shared.playState(of: Self.target)
+                PlayCircleButton(size: 44, isPlaying: state == .playing, loading: state == .loading) {
                     PlayerController.shared.playOrToggle(topTracks, from: Self.target)
                 }
                 IconButton(systemImage: "shuffle", size: 20, label: String(localized: "Shuffle play")) {
@@ -249,11 +250,16 @@ private struct TopArtistCard: View {
                 }
                 // The round play button: plays the artist (their top songs).
                 .overlay(alignment: .bottomTrailing) {
-                    if hovering, let id = artist.artist.browseId {
-                        PlayCircleButton(size: 44) {
-                            PlayerController.shared.playCollection(BrowseTarget(browseId: id, kind: .artist, title: artist.artist.name))
+                    if let id = artist.artist.browseId {
+                        let target = BrowseTarget(browseId: id, kind: .artist, title: artist.artist.name)
+                        let state = PlayerController.shared.playState(of: target)
+                        if hovering || state == .loading || state == .playing {
+                            PlayCircleButton(size: 44, isPlaying: state == .playing, loading: state == .loading) {
+                                if state == .playing || state == .paused { PlayerController.shared.togglePlayPause() }
+                                else { PlayerController.shared.playCollection(target) }
+                            }
+                            .transition(.opacity.combined(with: .offset(y: 6)))
                         }
-                        .transition(.opacity.combined(with: .offset(y: 6)))
                     }
                 }
                 .animation(.easeOut(duration: 0.15), value: hovering)
