@@ -287,6 +287,7 @@ final class CastController {
         if let awake { ProcessInfo.processInfo.endActivity(awake) }
         awake = nil
         CastMediaServer.shared.stop()
+        TVYouTubeApp.shared.castEnded()
         PlayerController.shared.castingEnded(at: position, playing: wasPlaying && resumeLocally)
     }
 
@@ -1118,9 +1119,9 @@ final class CastController {
         settling = true
         settlingSince = Date()
         guard !track.isLocal else {
-            // A file on this Mac: the TV's YouTube app can't have it.
-            Router.shared.showToast(String(localized: "Files on this Mac can't play on the TV's YouTube app"), icon: "exclamationmark.triangle.fill")
-            DispatchQueue.main.async { PlayerController.shared.castFinishedSong(track.videoId) }
+            // A file on this Mac: the TV's YouTube app can't have it, so this Mac streams it (and
+            // the rest of this cast) instead.
+            if let device { DispatchQueue.main.async { TVYouTubeApp.shared.suspend(for: device) } }
             return
         }
         let player = PlayerController.shared

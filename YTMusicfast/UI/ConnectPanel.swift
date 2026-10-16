@@ -47,7 +47,7 @@ struct ConnectPanel: View {
                         .padding(.bottom, cast.device?.isSpeaker == false ? 4 : 18)
                     if let device = cast.device, !device.isSpeaker {
                         YouTubeAppSwitch(device: device)
-                            .padding(.bottom, 14)
+                            .padding(.bottom, 12)
                     }
                     let casting = cast.device != nil
                     if player.outputDeviceUID != nil || player.isAirPlaying || casting {
@@ -95,7 +95,7 @@ struct ConnectPanel: View {
                         }
                         .contextMenu {
                             if !device.isSpeaker {
-                                Toggle("Play on the TV's YouTube app", isOn: Binding(get: { youTubeApp }, set: { TVYouTubeApp.shared.set($0, for: device) }))
+                                Toggle("Use the TV's YouTube app", isOn: Binding(get: { youTubeApp }, set: { TVYouTubeApp.shared.set($0, for: device) }))
                             }
                         }
                     }
@@ -165,20 +165,17 @@ private struct YouTubeAppSwitch: View {
 
     var body: some View {
         Toggle(isOn: Binding(get: { TVYouTubeApp.shared.isOn(for: device) }, set: { TVYouTubeApp.shared.set($0, for: device) })) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Play on the TV's YouTube app").font(.system(size: 13, weight: .semibold))
-                Text("This Mac can sleep while it plays; the TV shows YouTube's own screen.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Use the TV's YouTube app")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .toggleStyle(.switch)
-        .controlSize(.small)
+        .controlSize(.mini)
         .tint(Theme.accent)
+        .help(String(localized: "On: the TV's YouTube app plays the music, with the TV's YouTube account, and this Mac can sleep. Off: this Mac streams to the TV."))
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.vertical, 2)
     }
 }
 

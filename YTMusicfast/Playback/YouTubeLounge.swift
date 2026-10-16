@@ -5,25 +5,45 @@ import os
 private let loungeLog = Logger(subsystem: "dev.ytmusicfast", category: "Lounge")
 
 /// Which TVs play through their own YouTube app instead of this Mac's media server, so this Mac
-/// can sleep while they play (the Connect panel's switch). Off for every TV until turned on.
+/// can sleep while they play: every TV, unless turned off for it (the Connect panel's switch).
+/// When the YouTube app doesn't start or pair, this Mac's stream takes over.
 @MainActor
 @Observable
 final class TVYouTubeApp {
     static let shared = TVYouTubeApp()
-    private static let key = "castViaYouTubeApp"
-    private(set) var deviceIds = Set(UserDefaults.standard.stringArray(forKey: TVYouTubeApp.key) ?? [])
+    private static let offKey = "castViaYouTubeAppOff"
+    private(set) var offIds = Set(UserDefaults.standard.stringArray(forKey: TVYouTubeApp.offKey) ?? [])
+    /// For this cast only: a file on this Mac came up, which the TV's YouTube app can't play, so
+    /// this Mac's stream took over until casting ends.
+    private(set) var suspendedId: String?
 
     private init() {}
 
     /// Speakers have no YouTube app.
-    func isOn(for device: CastDevice) -> Bool { !device.isSpeaker && deviceIds.contains(device.id) }
+    func isOn(for device: CastDevice) -> Bool {
+        !device.isSpeaker && !offIds.contains(device.id) && suspendedId != device.id
+    }
 
     func set(_ on: Bool, for device: CastDevice) {
         guard on != isOn(for: device), !device.isSpeaker || !on else { return }
-        if on { deviceIds.insert(device.id) } else { deviceIds.remove(device.id) }
-        UserDefaults.standard.set(deviceIds.sorted(), forKey: Self.key)
+        if on {
+            offIds.remove(device.id)
+            suspendedId = nil
+        } else {
+            offIds.insert(device.id)
+        }
+        UserDefaults.standard.set(offIds.sorted(), forKey: Self.offKey)
         CastController.shared.youTubeAppSettingChanged(for: device)
     }
+
+    /// A file on this Mac is next: this cast goes on from this Mac's stream.
+    func suspend(for device: CastDevice) {
+        guard suspendedId != device.id else { return }
+        suspendedId = device.id
+        CastController.shared.youTubeAppSettingChanged(for: device)
+    }
+
+    func castEnded() { suspendedId = nil }
 }
 
 /// A remote-control session with the YouTube app on a TV (see `Lounge`): pairs with its screen
