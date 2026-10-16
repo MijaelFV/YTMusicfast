@@ -109,7 +109,9 @@ final class VideoController {
             videoLog.notice("refresh: keeping \(loadedVideoId, privacy: .public) while the switch finishes")
             return
         }
-        guard videoMode, surfaces > 0, let track = PlayerController.shared.current, track.isVideo, !track.isLocal else {
+        // Casting: the TV shows the video; downloading and decoding it here too would be wasted.
+        guard videoMode, surfaces > 0, !CastController.shared.isActive,
+              let track = PlayerController.shared.current, track.isVideo, !track.isLocal else {
             if loadedVideoId != nil {
                 videoLog.notice("refresh: stop (videoMode \(self.videoMode), surfaces \(self.surfaces), video \(PlayerController.shared.current?.isVideo == true))")
             }

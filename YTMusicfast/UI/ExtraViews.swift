@@ -362,6 +362,20 @@ struct NowPlayingVisual: View {
             }
         }
         .animation(.easeInOut(duration: 0.4), value: video.hasVideo)
+        // Casting: where it's playing, in place of a picture that's on the TV instead.
+        .overlay(alignment: .bottom) {
+            if let device = CastController.shared.isActive ? CastController.shared.device : nil, fullScreen || size >= 200 {
+                Label(String(localized: "Playing on \(device.name)"), systemImage: device.symbol)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(.black.opacity(0.55), in: Capsule())
+                    .padding(14)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: CastController.shared.isActive)
         .onAppear { video.surfaceAppeared() }
         .onDisappear { video.surfaceDisappeared() }
     }

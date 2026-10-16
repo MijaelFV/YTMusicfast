@@ -1596,6 +1596,8 @@ final class PlayerController {
         enqueueTask?.cancel()
         // A song/video switch started here would swap in a player on this Mac.
         cancelVersionSwitch()
+        // The picture plays on the TV now, not here.
+        VideoController.shared.trackChanged()
         player.pause()
         player.removeAllItems()
         itemEntries.removeAll()
@@ -1720,10 +1722,10 @@ final class PlayerController {
 
         guard let index = currentIndex, queue.indices.contains(index) else { return }
         let entry = queue[index]
-        soundAsked = (entry.track.videoId, Date())
-        perfLog.notice("play \(entry.track.videoId, privacy: .public)")
         // A Song/Video switch for the song before has nothing left to switch.
         if let versionEntry, versionEntry != entry.id { cancelVersionSwitch() }
+        soundAsked = (entry.track.videoId, Date())
+        perfLog.notice("play \(entry.track.videoId, privacy: .public)")
         // Skipping through songs quickly: only the one you stop on loads, and the downloads of
         // those passed by stop. Otherwise each would go on resolving and downloading, and the
         // song you land on would wait behind them all.
@@ -1739,10 +1741,10 @@ final class PlayerController {
         }
         // Casting: the device plays it (from this Mac's media server); nothing loads here.
         if CastController.shared.isActive {
-            soundAsked = nil
             isBuffering = true
             nowPlaying.updateTrack()
             VideoController.shared.trackChanged()
+            soundAsked = nil
             let position = pendingSeek ?? 0, autoplay = !startsPaused
             pendingSeek = nil
             if Self.needsOtherVersion(entry) {

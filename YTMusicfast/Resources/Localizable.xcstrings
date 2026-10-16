@@ -3974,6 +3974,26 @@
         }
       }
     },
+    "Lyrics off on %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Letras desactivadas en %@"
+          }
+        }
+      }
+    },
+    "Lyrics on %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Letras en %@"
+          }
+        }
+      }
+    },
     "Lyrics and more": {
       "localizations": {
         "es": {

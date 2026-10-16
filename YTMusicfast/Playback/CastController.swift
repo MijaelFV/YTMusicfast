@@ -154,6 +154,18 @@ final class CastController {
         }
     }
 
+    /// Casting a music video to a TV: the lyrics buttons show or hide its captions there.
+    var lyricsButtonsControlTV: Bool {
+        isActive && device?.isSpeaker == false && PlayerController.shared.current.map(castsVideo) == true
+    }
+
+    func toggleLyricsOnTV() {
+        lyricsOnTV.toggle()
+        let name = device?.name ?? ""
+        Router.shared.showToast(lyricsOnTV ? String(localized: "Lyrics on \(name)") : String(localized: "Lyrics off on \(name)"),
+                                icon: "music.mic")
+    }
+
     /// Lyrics go to the device: the setting is on and it's a TV.
     var wantsLyrics: Bool { lyricsOnTV && device?.isSpeaker == false }
 

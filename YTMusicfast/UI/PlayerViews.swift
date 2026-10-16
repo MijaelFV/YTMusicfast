@@ -98,8 +98,11 @@ struct PlayerBar: View {
                     withAnimation(.spring(duration: 0.3)) { router.togglePanel(.nowPlaying) }
                 }
             }
-            IconButton(systemImage: "music.mic", size: 15, active: router.route == .lyrics, label: String(localized: "Lyrics (⌥⌘L)")) {
-                router.toggleLyrics()
+            let cast = CastController.shared
+            IconButton(systemImage: "music.mic", size: 15,
+                       active: cast.lyricsButtonsControlTV ? cast.lyricsOnTV : router.route == .lyrics,
+                       label: String(localized: "Lyrics (⌥⌘L)")) {
+                if cast.lyricsButtonsControlTV { cast.toggleLyricsOnTV() } else { router.toggleLyrics() }
             }
             IconButton(systemImage: "list.bullet", size: 15, active: router.rightPanel == .queue, label: String(localized: "Queue (⌥⌘U)")) {
                 withAnimation(.spring(duration: 0.3)) { router.togglePanel(.queue) }
