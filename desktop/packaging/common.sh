@@ -66,6 +66,6 @@ check_no_build_paths() {
       fi
     done
   done
-  [[ $found == 0 ]] && echo "No build paths in: $(printf '%s ' "${@##*/}")"
+  [[ $found == 0 ]] && echo "No build paths ($(printf '%s, ' "${prefixes[@]}")) in: $(printf '%s ' "${@##*/}")"
   return $found
 }

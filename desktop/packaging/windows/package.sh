@@ -73,6 +73,7 @@ vpk pack \
   --mainExe "$MAIN_EXE.exe" \
   --icon "$(native_path "$icon")" \
   --shortcuts "Desktop,StartMenuRoot" \
+  --aumid "$APP_ID" \
   --channel win \
   --outputDir "$(native_path "$releases")" \
   "${notes_args[@]}"
