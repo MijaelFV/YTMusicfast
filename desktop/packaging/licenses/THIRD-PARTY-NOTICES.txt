@@ -3,18 +3,16 @@ YT Musicfast for Windows and Linux: third-party software in this package
 
 YT Musicfast itself is MIT-licensed (LICENSE). This package also contains:
 
-libmpv (libmpv-2.dll on Windows; libmpv.so.2 and the libraries it uses in the AppImage)
-  mpv, https://mpv.io, with FFmpeg (https://ffmpeg.org) and the other libraries it is built with.
-  mpv is LGPL 2.1 or later, with parts under GPL 2 or later; these builds include the GPL parts,
-  so libmpv here is distributed under the GNU General Public License, version 3 (GPL-3.0.txt;
-  the LGPL is in LGPL-2.1.txt).
-  - Windows: built by https://github.com/shinchiro/mpv-winbuild-cmake, whose build scripts list
-    every source it builds; the build used is named in .github/actions/libmpv-windows of
-    https://github.com/MijaelFV/YTMusicfast at this release's tag.
-  - AppImage: Debian 12's packages; each library's copyright file is in usr/share/doc, and the
-    sources are at https://sources.debian.org.
-  The Flatpak builds mpv and FFmpeg without GPL parts (LGPL 2.1 or later) from the sources
-  named in its manifest.
+libmpv: mpv (https://mpv.io), with FFmpeg (https://ffmpeg.org) and the libraries it is built with
+  - Windows (libmpv-2.dll): built by https://github.com/shinchiro/mpv-winbuild-cmake with mpv's GPL
+    parts and GPL libraries, so distributed under the GNU General Public License, version 3
+    (GPL-3.0.txt). Its build scripts list every source it builds; the build used is named in
+    .github/actions/libmpv-windows of https://github.com/MijaelFV/YTMusicfast at this release's tag.
+  - AppImage and Flatpak: mpv, FFmpeg and libplacebo built from source without GPL parts, so
+    LGPL 2.1 or later (LGPL-2.1.txt); the sources are named in desktop/packaging/linux/
+    build-libmpv.sh and desktop/packaging/flatpak of the same repository. Their license files are
+    in usr/share/doc (AppImage); the other libraries the AppImage bundles come from Debian 12,
+    each with its copyright file in usr/share/doc (sources at https://sources.debian.org).
 
 Velopack (Update.exe, UpdateNix and the update library in the app), MIT License, see
   Velopack-MIT.txt. https://github.com/velopack/velopack

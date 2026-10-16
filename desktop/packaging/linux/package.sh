@@ -2,29 +2,31 @@
 # Packages the Linux app as an AppImage with Velopack: YTMusicfast.AppImage (runs as is and updates
 # itself), the full and delta update packages and the update feed (releases.linux.json).
 #
-#   desktop/packaging/linux/package.sh --releases DIR --publish DIR
+#   desktop/packaging/linux/package.sh --libmpv PREFIX --releases DIR --publish DIR
 #
+#   --libmpv    where build-libmpv.sh installed libmpv
 #   --releases  vpk's release folder; put the previous release in it first (previous-release.sh)
 #               to get a delta package
 #   --publish   receives only this release's new files, the ones to attach to the GitHub Release
 #
 # Run after `cargo build --release` on the oldest system the AppImage should run on: it bundles
-# that system's libmpv and everything libmpv needs, except what has to come from the running
+# libmpv and everything it needs from that system, except what has to come from the running
 # system (the C library, GPU drivers, display and sound servers, fonts; see excludelist). Built on
-# Debian 12, the AppImage runs on distributions with glibc 2.36 or later. Needs libmpv-dev,
-# patchelf, squashfs-tools, dpkg (for the bundled libraries' copyright files) and vpk.
+# Debian 12, the AppImage runs on distributions with glibc 2.36 or later. Needs patchelf,
+# squashfs-tools, dpkg (for the bundled libraries' copyright files) and vpk.
 # Set REQUIRE_UPDATE_HOOK=1 to fail when the app doesn't call ytm_update::startup().
 set -euo pipefail
 source "$(dirname "$0")/../common.sh"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --libmpv) libmpv_prefix=$2; shift 2 ;;
     --releases) releases=$2; shift 2 ;;
     --publish) publish=$2; shift 2 ;;
     *) echo "unknown argument $1" >&2; exit 2 ;;
   esac
 done
-: "${releases:?--releases}" "${publish:?--publish}"
+: "${libmpv_prefix:?--libmpv}" "${releases:?--releases}" "${publish:?--publish}"
 
 version=$(workspace_version)
 target="$DESKTOP_DIR/target/release"
@@ -49,8 +51,9 @@ fi
 
 # libmpv and what it needs. The app links libmpv.so.2 (libmpv2-sys); it's bundled even when a
 # build doesn't load it yet, so the AppImage is complete either way.
-libmpv=$(/sbin/ldconfig -p | awk '$1 == "libmpv.so.2" && /x86-64/ { print $NF; exit }')
-[[ -n "$libmpv" ]] || { echo "::error::libmpv.so.2 isn't installed (apt install libmpv-dev)" >&2; exit 1; }
+libmpv="$libmpv_prefix/lib/libmpv.so.2"
+[[ -f "$libmpv" ]] || { echo "::error::no $libmpv (run build-libmpv.sh)" >&2; exit 1; }
+export LD_LIBRARY_PATH="$libmpv_prefix/lib"  # for ldd: FFmpeg's libraries are next to libmpv
 mapfile -t excluded < <(sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$linux/excludelist" | grep -v '^$')
 is_excluded() {
   local name
@@ -83,8 +86,10 @@ done
 echo "Bundled ${#bundled[@]} libraries:"
 (cd "$appdir/usr/lib" && ls)
 
-# Their licenses: each bundled library's Debian copyright file.
+# Their licenses: libmpv's and FFmpeg's from the build, each Debian library's copyright file.
+cp -R "$libmpv_prefix/share/doc/." "$appdir/usr/share/doc/"
 for path in "${bundled[@]}"; do
+  [[ "$path" == "$libmpv_prefix"/* ]] && continue
   package=$(dpkg -S "*/$(basename "$(readlink -f "$path")")" 2> /dev/null | head -1 | cut -d: -f1)
   [[ -n "$package" && -f "/usr/share/doc/$package/copyright" ]] || {
     echo "::error::no copyright file for $path" >&2
@@ -122,7 +127,7 @@ vpk pack \
   --packDir "$appdir" \
   --mainExe "$MAIN_EXE" \
   --icon "$icons/256x256/apps/$APP_ID.png" \
-  --compression zstd \
+  --compression gzip \
   --channel linux \
   --outputDir "$releases" \
   "${notes_args[@]}"

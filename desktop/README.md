@@ -83,15 +83,19 @@ and the sign-in helper `ytmusicfast-signin.exe` (when it's built) ship next to i
 linked statically (`-C target-feature=+crt-static`), so nobody needs the Visual C++ Redistributable.
 
 **AppImage** (on Debian 12, the oldest system it supports, e.g. `docker run -it -v "$PWD:/src"
-debian:bookworm`; needs the build packages above plus `patchelf squashfs-tools` and vpk):
+debian:bookworm`, with the packages the release workflow's Linux job installs, and vpk):
 
 ```bash
+packaging/linux/build-libmpv.sh /opt/ytm-libmpv
+LIBRARY_PATH=/opt/ytm-libmpv/lib cargo build --release -p ytmusicfast
 packaging/previous-release.sh linux 0.1.0 releases
-packaging/linux/package.sh --releases releases --publish publish
+packaging/linux/package.sh --libmpv /opt/ytm-libmpv --releases releases --publish publish
 ```
 
-It bundles libmpv and everything it needs except what has to come from the running system (the C
-library, the GPU drivers' OpenGL, the display and sound servers' libraries, fonts:
+It bundles a libmpv built for the app ([`packaging/linux/build-libmpv.sh`](packaging/linux/build-libmpv.sh):
+decoding and HTTPS streaming, the OpenGL render API, PulseAudio and ALSA; Debian's own libmpv would
+bring ~200 libraries) and what it needs from Debian 12, except what has to come from the running
+system (the C library, the GPU drivers' OpenGL, the display and sound servers' libraries, fonts:
 [`packaging/linux/excludelist`](packaging/linux/excludelist)). Every binary finds the bundled
 libraries through an `$ORIGIN` RUNPATH, not `LD_LIBRARY_PATH`, so programs the app opens (the
 browser, the file manager) run with the system's own. The sign-in helper is the exception: its
@@ -166,13 +170,14 @@ in `licenses\` beside the exe on Windows, in `usr/share/doc/ytmusicfast` in the 
 `/app/share/licenses` in the Flatpak. The libmpv each package ships is free software under its own
 terms:
 
-- **Flatpak:** mpv and FFmpeg built without GPL parts, so LGPL 2.1 or later.
-- **AppImage:** Debian 12's libmpv and its libraries, each with its Debian copyright file in
-  `usr/share/doc`. Debian's mpv includes GPL parts.
+- **AppImage and Flatpak:** mpv, FFmpeg and libplacebo built without GPL parts, so LGPL 2.1 or
+  later; the AppImage's other libraries come from Debian 12, each with its copyright file in
+  `usr/share/doc`.
 - **Windows:** [shinchiro's mpv build](https://github.com/shinchiro/mpv-winbuild-cmake), built with
   mpv's `gpl` option and GPL libraries, so GPL 3. The package ships no license files of its own,
   hence the notices.
 
-With a GPL libmpv the package as a whole is distributed under the GPL (the app's own code stays MIT),
-which only asks that the license travels with it and the sources stay available: upstream mpv and
-FFmpeg, Debian's source packages, and shinchiro's build scripts are all public.
+With a GPL libmpv the Windows package as a whole is distributed under the GPL (the app's own code
+stays MIT), which asks that the license travels with it and the sources stay available: upstream mpv
+and FFmpeg and shinchiro's build scripts are all public. Building the Windows libmpv without GPL
+parts too would make all three packages LGPL.

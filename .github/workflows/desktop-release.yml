@@ -232,8 +232,8 @@ jobs:
     name: Linux (AppImage)
     needs: prepare
     runs-on: ubuntu-latest
-    # Built on Debian 12, the oldest system the AppImage supports (glibc 2.36): its libmpv and
-    # what libmpv needs are bundled, and the binaries need nothing newer than that.
+    # Built on Debian 12, the oldest system the AppImage supports (glibc 2.36): libmpv is built
+    # here and bundled with what it needs, and the binaries need nothing newer than that.
     container: debian:bookworm-20261005
     timeout-minutes: 60
     defaults:
@@ -245,13 +245,16 @@ jobs:
     steps:
       - name: Install Debian packages
         working-directory: /
-        # The build: compiler, libmpv and Slint's Linux libraries (as in desktop.yml). Packaging:
-        # patchelf, squashfs-tools, ICU for vpk (.NET), and the desktop and AppStream validators.
+        # The build: compiler, Slint's Linux libraries (as in desktop.yml) and what libmpv is built
+        # from (build-libmpv.sh). Packaging: patchelf, squashfs-tools, ICU for vpk (.NET), and the
+        # desktop and AppStream validators.
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates curl git gcc libc6-dev pkg-config jq unzip file \
-            libmpv-dev libfontconfig-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            ca-certificates curl git gcc g++ libc6-dev make pkg-config jq unzip file xz-utils \
+            libfontconfig-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            nasm ninja-build python3-venv libass-dev libgnutls28-dev libdav1d-dev zlib1g-dev \
+            libpulse-dev libasound2-dev \
             patchelf squashfs-tools libicu72 desktop-file-utils appstream
 
       - uses: actions/checkout@v7.0.1
@@ -260,8 +263,24 @@ jobs:
         with:
           toolchain: stable
 
+      # The AppImage's libmpv, built once per change to the script (its sources are pinned there).
+      - uses: actions/cache@v6.1.0
+        id: libmpv-cache
+        with:
+          path: /opt/ytm-libmpv
+          key: libmpv-bookworm-${{ hashFiles('desktop/packaging/linux/build-libmpv.sh') }}
+
+      - name: Build libmpv
+        if: steps.libmpv-cache.outputs.cache-hit != 'true'
+        run: packaging/linux/build-libmpv.sh /opt/ytm-libmpv
+
       - name: Build settings
         run: |
+          {
+            echo "PKG_CONFIG_PATH=/opt/ytm-libmpv/lib/pkgconfig"
+            echo "LIBRARY_PATH=/opt/ytm-libmpv/lib"     # to link libmpv
+            echo "LD_LIBRARY_PATH=/opt/ytm-libmpv/lib"  # to run tests that load it
+          } >> "$GITHUB_ENV"
           cargo_home=${CARGO_HOME:-$HOME/.cargo}
           rustup_home=${RUSTUP_HOME:-$HOME/.rustup}
           echo "RUSTFLAGS=--remap-path-prefix=$GITHUB_WORKSPACE=/build --remap-path-prefix=$cargo_home=/cargo --remap-path-prefix=$rustup_home=/rustup" >> "$GITHUB_ENV"
@@ -309,7 +328,9 @@ jobs:
         run: packaging/previous-release.sh linux "$VERSION" "$RUNNER_TEMP/releases"
 
       - name: Package
-        run: packaging/linux/package.sh --releases "$RUNNER_TEMP/releases" --publish "$RUNNER_TEMP/publish"
+        run: |
+          packaging/linux/package.sh --libmpv /opt/ytm-libmpv \
+            --releases "$RUNNER_TEMP/releases" --publish "$RUNNER_TEMP/publish"
 
       - name: Check the AppImage
         working-directory: ${{ runner.temp }}
