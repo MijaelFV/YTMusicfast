@@ -1,0 +1,155 @@
+name: Desktop
+
+on:
+  push:
+    branches: [main, cross-platform]
+    paths:
+      - "desktop/**"
+      - "YTMusicfastTests/Fixtures/**"
+      - "clients.json"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "YTMusicfastTests/Fixtures/**"
+      - "clients.json"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+
+# Linux and Windows runner minutes are free for public repositories but billed (Windows at 2×) for
+# private ones, so while the repository is private only manual runs happen ("Run workflow" in the
+# Actions tab), as in ci.yml.
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # libmpv for Windows: shinchiro's mpv-winbuild-cmake dev package. GitHub keeps only its last ~30
+  # daily releases, so the weekly copy on SourceForge (the same file) is the fallback once this one
+  # rotates out. To update, pick a build present in both places and replace all three values.
+  MPV_DEV_FILE: mpv-dev-x86_64-20261011-git-accb7b2821.7z
+  MPV_DEV_RELEASE: "20261011"
+  MPV_DEV_SHA256: cf63b4ce66e03e5e70acf2648cbc3177656c77c5b9583e16d83efc58801182b7
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    if: github.event_name == 'workflow_dispatch' || !github.event.repository.private
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            binary: ytmusicfast
+          - os: windows-latest
+            name: windows-x86_64
+            binary: ytmusicfast.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        # libmpv for playback; the rest is what Slint's winit backend and femtovg (OpenGL) renderer
+        # need to build (Slint's docs/building.md). Wayland, EGL and GL are loaded at run time.
+        run: |
+          sudo timeout 600 apt-get update
+          sudo timeout 600 apt-get install -y --no-install-recommends \
+            pkg-config libmpv-dev libfontconfig-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - name: Install libmpv (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: ${{ runner.temp }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $urls = @(
+            "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/$env:MPV_DEV_RELEASE/$env:MPV_DEV_FILE",
+            "https://downloads.sourceforge.net/project/mpv-player-windows/libmpv/$env:MPV_DEV_FILE"
+          )
+          $archive = Join-Path $env:RUNNER_TEMP $env:MPV_DEV_FILE
+          $downloaded = $false
+          foreach ($url in $urls) {
+            try {
+              Invoke-WebRequest -Uri $url -OutFile $archive -MaximumRetryCount 3 -RetryIntervalSec 5 -UserAgent 'curl/8'
+              $downloaded = $true
+              break
+            } catch {
+              Write-Warning "Download from $url failed: $_"
+            }
+          }
+          if (-not $downloaded) { throw "Could not download $env:MPV_DEV_FILE" }
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($hash -ne $env:MPV_DEV_SHA256) { throw "SHA-256 mismatch: got $hash" }
+
+          $mpv = Join-Path $env:RUNNER_TEMP 'mpv'
+          7z x $archive "-o$mpv" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7z failed" }
+
+          # libmpv2-sys links `mpv`, which MSVC resolves as mpv.lib: build that import library from
+          # the DLL's export table (the package ships only a MinGW import library).
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $libExe = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\lib.exe' | Select-Object -First 1
+          if (-not $libExe) { throw "lib.exe not found" }
+          $dumpbin = Join-Path (Split-Path $libExe) 'dumpbin.exe'
+          $exports = & $dumpbin /nologo /exports (Join-Path $mpv 'libmpv-2.dll')
+          if ($LASTEXITCODE -ne 0) { throw "dumpbin failed" }
+          $names = $exports | ForEach-Object { if ($_ -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)') { $Matches[1] } }
+          if (-not ($names -contains 'mpv_create')) { throw "mpv_create is not exported by libmpv-2.dll" }
+          $def = Join-Path $mpv 'mpv.def'
+          @('LIBRARY libmpv-2.dll', 'EXPORTS') + $names | Set-Content -Encoding ascii $def
+          & $libExe /nologo "/def:$def" /machine:x64 "/out:$(Join-Path $mpv 'mpv.lib')"
+          if ($LASTEXITCODE -ne 0) { throw "lib.exe failed" }
+          Write-Host "mpv.lib: $($names.Count) exports"
+
+          # The linker finds mpv.lib through LIB; tests and the binary load libmpv-2.dll from PATH.
+          "LIB=$mpv;$env:LIB" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "MPV_DIR=$mpv" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          $mpv | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          # The cache key already hashes desktop/Cargo.lock and the toolchain version.
+          workspaces: desktop
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Tests
+        # The live network test is opt-in (YTF_LIVE=1); CI runs the offline suite.
+        run: cargo test --workspace --locked
+
+      - name: Release build
+        run: cargo build --release --locked -p ytmusicfast
+
+      - name: Collect the build
+        shell: pwsh
+        run: |
+          $dist = New-Item -ItemType Directory -Force (Join-Path $env:RUNNER_TEMP 'dist')
+          Copy-Item (Join-Path 'target' 'release' '${{ matrix.binary }}') $dist
+          if ($IsWindows) { Copy-Item (Join-Path $env:MPV_DIR 'libmpv-2.dll') $dist }
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ytmusicfast-${{ matrix.name }}
+          path: ${{ runner.temp }}/dist/
+          retention-days: 7
+          if-no-files-found: error
