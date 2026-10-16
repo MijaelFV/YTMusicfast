@@ -55,7 +55,7 @@ Open Anyway**. It updates itself after that. Requires macOS 15 Sequoia or later.
 | **Offline** | Download albums and playlists; songs you've played replay instantly without data |
 | **Content filter** | Hide AI-generated music, explicit songs, and artists or songs you choose |
 | **Your account** | Mixes, Liked Music, playlists and History, kept in step with your phone and the website |
-| **Play anywhere** | Google Cast, AirPlay, a phone remote, and Listen together with people nearby |
+| **Play anywhere** | Google Cast (music videos on your TV, with lyrics if you like, no ads), AirPlay, a phone remote, and Listen together with people nearby |
 | **Your Stats** | Top songs and artists and when you listen, kept on your Mac |
 | **Keyboard first** | Shortcuts for everything, a menu-bar player, a miniplayer, a notch player, a command-line tool and Shortcuts actions |
 
