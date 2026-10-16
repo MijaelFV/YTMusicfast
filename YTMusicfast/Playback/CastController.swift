@@ -151,9 +151,10 @@ final class CastController {
         var media: [String: Any]
     }
 
-    /// Synced lyrics as captions over music videos on a TV (Settings → Casting, the ⚙︎ video menu).
-    /// Only when this Mac streams to it: the TV's YouTube app plays without them.
-    var lyricsOnTV = UserDefaults.standard.object(forKey: "castLyrics") as? Bool ?? true {
+    /// Synced lyrics as captions over music videos on a TV (Settings → Casting, the ⚙︎ video menu,
+    /// the TV's ⋯ in Connect). Off by default: captions over a video on a shared screen are asked
+    /// for. Only when this Mac streams to it: the TV's YouTube app plays without them.
+    var lyricsOnTV = UserDefaults.standard.object(forKey: "castLyrics") as? Bool ?? false {
         didSet {
             UserDefaults.standard.set(lyricsOnTV, forKey: "castLyrics")
             lyricsSettingChanged()
