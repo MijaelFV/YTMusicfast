@@ -1659,6 +1659,14 @@ final class PlayerController {
     }
 
     /// The device's playing / paused / buffering state changed.
+    /// The device says how long the song is. Casting, nothing loads here to tell (and some songs
+    /// come without a length), so its figure is the one to show.
+    func castDurationReported(_ seconds: TimeInterval) {
+        guard CastController.shared.isActive, seconds.isFinite, seconds > 0, abs(seconds - duration) > 1 else { return }
+        duration = seconds
+        nowPlaying.updatePlayback()
+    }
+
     func castStatusChanged() {
         let cast = CastController.shared
         guard cast.isActive else { return }

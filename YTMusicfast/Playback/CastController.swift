@@ -828,6 +828,11 @@ final class CastController {
             if let pendingPlaying, !pendingPlayingSent { pendingPlayingSent = mediaCommand(pendingPlaying ? "PLAY" : "PAUSE") != nil }
             if let pendingSeek, mediaCommand("SEEK", ["currentTime": pendingSeek]) != nil { self.pendingSeek = nil }
         }
+        // Its length, when it's about the song shown here (the device may be on its queued next).
+        if let media = status["media"] as? [String: Any], let length = media["duration"] as? Double,
+           let loaded = loadedVideoId, (media["contentId"] as? String)?.contains(loaded) == true {
+            PlayerController.shared.castDurationReported(length)
+        }
         let playerState = status["playerState"] as? String ?? ""
         let itemId = status["currentItemId"] as? Int
         castLog.debug("status \(playerState, privacy: .public) session \(id ?? -1) item \(itemId ?? -1) at \(status["currentTime"] as? Double ?? -1) reason \(status["idleReason"] as? String ?? "-", privacy: .public)")
@@ -1207,6 +1212,10 @@ final class CastController {
             return
         }
         guard let state = playback.state else { return }
+        // An ad's position and length aren't the song's.
+        if state != .advertisement, tvVideoId == loadedVideoId, let length = playback.duration {
+            PlayerController.shared.castDurationReported(length)
+        }
         let reportedPlaying: Bool
         switch state {
         case .playing, .buffering, .unstarted, .advertisement: reportedPlaying = true
@@ -1217,7 +1226,7 @@ final class CastController {
         if !waiting {
             pendingPlaying = nil
             remotePlaying = reportedPlaying
-            if pendingSeek == nil, let time = playback.currentTime {
+            if pendingSeek == nil, state != .advertisement, let time = playback.currentTime {
                 remoteTime = time
                 remoteTimeAt = Date()
             }
