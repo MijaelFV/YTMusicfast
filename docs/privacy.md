@@ -47,8 +47,8 @@ Lyrics translation runs on-device. `brew uninstall --zap --cask ytmusicfast` rem
 Nothing listens on your network unless you use it:
 
 - **Google Cast**: devices are looked for only while the Connect panel is open; the song is served to the one you
-  pick from an address with a random secret, only while casting. With **Use the TV's YouTube app** on (off by
-  default; Settings → Casting, or per TV in the Connect panel) nothing is served: the TV's YouTube app plays the
+  pick from an address with a random secret, only while casting. With **TV plays on its own** (off by default;
+  Settings → Casting, or per TV from its ⋯ in the Connect panel) nothing is served: the TV's YouTube app plays the
   songs without an account, and the app sends it play/pause/seek/skip through YouTube's "link with TV" service,
   as a phone remote does. Files on this Mac always stream from it.
 - **Phone remote** (off by default): a small web page that needs a 6-digit PIN and pauses after ten wrong tries.

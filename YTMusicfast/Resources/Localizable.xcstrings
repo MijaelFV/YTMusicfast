@@ -523,6 +523,16 @@
         }
       }
     },
+    "How the TV plays": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cómo reproduce el televisor"
+          }
+        }
+      }
+    },
     "Lyrics on %@, streaming from this Mac": {
       "localizations": {
         "es": {
@@ -543,12 +553,22 @@
         }
       }
     },
-    "On: the TV's YouTube app plays the music and this Mac can sleep, but without your account, so the TV may show ads. Off: this Mac streams to the TV, without ads.": {
+    "No ads": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Activado: la app de YouTube del televisor reproduce la música y esta Mac puede dormir, pero sin tu cuenta, así que el televisor puede mostrar anuncios. Desactivado: esta Mac transmite al televisor, sin anuncios."
+            "value": "Sin anuncios"
+          }
+        }
+      }
+    },
+    "Over music videos (Video mode)": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sobre los videos musicales (modo Video)"
           }
         }
       }
@@ -573,6 +593,16 @@
         }
       }
     },
+    "Stream from this Mac": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transmitir desde esta Mac"
+          }
+        }
+      }
+    },
     "Streams from this Mac instead of the TV's YouTube app": {
       "localizations": {
         "es": {
@@ -589,6 +619,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "La letra sincronizada aparece como subtítulos sobre los videos musicales (modo Video) cuando esta Mac transmite al televisor. También en el menú ⚙︎ al transmitir."
+          }
+        }
+      }
+    },
+    "TV plays on its own": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El televisor reproduce por su cuenta"
+          }
+        }
+      }
+    },
+    "This Mac can sleep; the TV may show ads": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta Mac puede dormir; el televisor puede mostrar anuncios"
           }
         }
       }
@@ -8590,16 +8640,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "YT Musicfast es un proyecto independiente de código abierto. No está afiliado ni respaldado por Google o YouTube."
-          }
-        }
-      }
-    },
-    "Use the TV's YouTube app": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Usar la app de YouTube del televisor"
           }
         }
       }

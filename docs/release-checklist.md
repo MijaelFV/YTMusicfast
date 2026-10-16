@@ -91,14 +91,15 @@ Run through this with the release build before publishing (about 30 minutes).
 - [ ] Connect lists the Cast devices on the network, or says "No Cast devices found" and keeps looking.
 - [ ] Cast to a TV: it streams from the Mac, without ads; play/pause, seek, next and volume respond at once; the
       progress bar matches the TV's length; the next song follows without a gap on the TV.
-- [ ] Turn on "Use the TV's YouTube app" in Connect: the TV's YouTube app takes over at the same point, and the
+- [ ] The TV card's ⋯ → "TV plays on its own": the TV's YouTube app takes over at the same point, and the
       same controls work.
+- [ ] ⋯ → "Stream from this Mac" again: the Mac streams and no video starts on the Mac while it switches. A local
+      file always streams from the Mac.
 - [ ] Video mode while casting: the TV shows the music video full screen; the Mac shows the cover with "Playing on
       <TV>", and the lyrics button opens the lyrics here as usual.
-- [ ] Turn it off again: the Mac streams instead and no video starts on the Mac while it switches. A local file
-      always streams from the Mac.
-- [ ] ⚙︎ → Lyrics on the TV through the YouTube app: the TV switches to the Mac's stream with lyrics over the
-      video; choosing it again turns them off. Settings → Casting's defaults apply to a TV not changed in Connect.
+- [ ] ⚙︎ (or the TV card's ⋯) → Lyrics on the TV while the TV plays on its own: the TV switches to the Mac's
+      stream with lyrics over the video; choosing it again turns them off. Settings → Casting's defaults apply
+      to a TV not changed in Connect.
 - [ ] Press next ten times quickly while casting: the TV ends on the right song.
 
 ## Account sync and privacy

@@ -44,14 +44,7 @@ struct ConnectPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     currentCard
-                        .padding(.bottom, cast.device?.isSpeaker == false ? 4 : 18)
-                    if let device = cast.device, !device.isSpeaker {
-                        let youTubeApp = TVYouTubeApp.shared.isOn(for: device)
-                        CastSwitch(title: String(localized: "Use the TV's YouTube app"),
-                                   help: String(localized: "On: the TV's YouTube app plays the music and this Mac can sleep, but without your account, so the TV may show ads. Off: this Mac streams to the TV, without ads."),
-                                   isOn: Binding(get: { youTubeApp }, set: { TVYouTubeApp.shared.set($0, for: device) }))
-                        Spacer().frame(height: 12)
-                    }
+                        .padding(.bottom, 18)
                     let casting = cast.device != nil
                     if player.outputDeviceUID != nil || player.isAirPlaying || casting {
                         // Back to whatever macOS is set to.
@@ -98,7 +91,11 @@ struct ConnectPanel: View {
                         }
                         .contextMenu {
                             if !device.isSpeaker {
-                                Toggle("Use the TV's YouTube app", isOn: Binding(get: { youTubeApp }, set: { TVYouTubeApp.shared.set($0, for: device) }))
+                                Picker(selection: Binding(get: { youTubeApp }, set: { TVYouTubeApp.shared.set($0, for: device) })) {
+                                    Text("Stream from this Mac").tag(false)
+                                    Text("TV plays on its own").tag(true)
+                                } label: { EmptyView() }
+                                .pickerStyle(.inline)
                             }
                         }
                     }
@@ -139,49 +136,51 @@ struct ConnectPanel: View {
     private var currentCard: some View {
         let current = current
         return HStack(spacing: 16) {
-            Image(systemName: current.symbol)
-                .font(.system(size: 24, weight: .medium))
-                .frame(width: 32)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(current.name).font(.system(size: 17, weight: .semibold)).lineLimit(1)
-                Text(current.kind).font(.system(size: 14)).foregroundStyle(Theme.secondary).lineLimit(1)
+            HStack(spacing: 16) {
+                Image(systemName: current.symbol)
+                    .font(.system(size: 24, weight: .medium))
+                    .frame(width: 32)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(current.name).font(.system(size: 17, weight: .semibold)).lineLimit(1)
+                    Text(current.kind).font(.system(size: 14)).foregroundStyle(Theme.secondary).lineLimit(1)
+                }
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Playing on \(current.name)")
             Spacer(minLength: 0)
+            // How a TV plays: from this Mac's stream, or on its own through its YouTube app.
+            if let device = cast.device, !device.isSpeaker {
+                MenuButton.more(alignment: .trailing) { Self.playModeEntries(for: device) }
+                    .tooltip(String(localized: "How the TV plays"))
+            }
         }
         .foregroundStyle(Theme.accent)
-        .padding(.horizontal, 16)
+        .padding(.leading, 16)
+        .padding(.trailing, cast.device?.isSpeaker == false ? 8 : 16)
         .padding(.vertical, 18)
         .background(Theme.elevated, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Playing on \(current.name)")
+    }
+
+    /// The TV card's ⋯ menu: this Mac streams (no ads), or the TV's YouTube app plays on its own
+    /// (see `TVYouTubeApp`); and lyrics over its music videos, as in the ⚙︎ video menu.
+    private static func playModeEntries(for device: CastDevice) -> [MenuEntry] {
+        let youTubeApp = TVYouTubeApp.shared.isOn(for: device)
+        let cast = CastController.shared, lyrics = cast.showsLyricsOnTV
+        return [.item(String(localized: "Stream from this Mac"), subtitle: String(localized: "No ads"), checked: !youTubeApp) {
+                    TVYouTubeApp.shared.set(false, for: device)
+                },
+                .item(String(localized: "TV plays on its own"), subtitle: String(localized: "This Mac can sleep; the TV may show ads"), checked: youTubeApp) {
+                    TVYouTubeApp.shared.set(true, for: device)
+                },
+                .divider,
+                .item(String(localized: "Lyrics on the TV"),
+                      subtitle: youTubeApp ? String(localized: "Streams from this Mac instead of the TV's YouTube app") : String(localized: "Over music videos (Video mode)"),
+                      systemImage: "music.mic", checked: lyrics) { cast.setLyricsOnTV(!lyrics) }]
     }
 
     private func reload() {
         devices = OutputDevices.all()
         defaultUID = OutputDevices.defaultDeviceUID()
-    }
-}
-
-/// A setting for the TV playing now, under its card: whether it plays through its own YouTube app
-/// (see `TVYouTubeApp`).
-private struct CastSwitch: View {
-    var title: String
-    var help: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        Toggle(isOn: $isOn) {
-            Text(title)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .toggleStyle(.switch)
-        .controlSize(.mini)
-        .tint(Theme.accent)
-        .help(help)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 2)
     }
 }
 
