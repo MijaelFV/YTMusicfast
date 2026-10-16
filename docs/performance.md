@@ -34,7 +34,7 @@ Network time is counted separately from the app's own time, because YouTube's sp
   Home's saved copy shows about 0.1 s later. A build run for the first time takes about 0.8 s longer while macOS
   checks it.
 
-## Fixed in this round
+## Fixed in 0.1.3
 
 Before and after, three runs each, alternating, on the same network:
 

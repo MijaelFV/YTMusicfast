@@ -47,7 +47,8 @@ What YouTube Music on the web doesn't offer:
 - Artist pages with Popular (5, "See more" for 10), plays and lengths; album and playlist pages with sticky headers
 - **Radio** from any song, album, playlist or artist, with YouTube Music's tuning chips (Popular, Discover, Deep cuts,
   moods, decades); **Go to radio** to see its songs, get a new mix or save it; starting one never interrupts the song
-- **Queue** with drag-to-reorder and endless Autoplay; played songs stay in it and any song plays with a click
+- **Queue** with drag-to-reorder and endless Autoplay; played songs stay in it and any song plays with a click;
+  drag songs onto it to add them, select several (⌘-click, ⇧-click) to remove them or move them to the top
 - **Song/Video switch** and a **player page** — the cover or music video big in the middle (click the player bar, ⌥⌘P);
   the next songs play in the mode you're in, their music video or their song version ready before they start
 - **Sound** — YouTube's **Opus** stream; with **Premium**, Premium's own **Opus 256 kbps**; **gapless** playback and
@@ -58,7 +59,8 @@ What YouTube Music on the web doesn't offer:
 - **Play anywhere** — **Google Cast** (Chromecast, Google TV, Nest), **AirPlay** (HomePod, Apple TV, smart TVs) and any
   speaker or headphones from the Connect panel. A TV plays through its own YouTube app (on by default, a switch
   per TV; this Mac streams instead if the app can't start, and for your own files), so the Mac can sleep while
-  the TV goes on through the queue
+  the TV goes on through the queue. In Video mode the TV plays the music video full screen, with synced lyrics
+  over it (Settings → Playback, or the lyrics button)
 - **Thumbs up / down** — a thumbs down skips the song and plays less like it
 - Time-synced **lyrics**, **comments** (sort, replies, post), "Related" music, **podcasts** (Episodes for Later,
   resume where you stopped), **uploads** of your own songs, private session
@@ -74,14 +76,15 @@ What YouTube Music on the web doesn't offer:
   for Terminal, scripts, Raycast and Alfred (install it from Settings → General → Command-line tool)
 - **Links** — paste a music.youtube.com, youtube.com or youtu.be link (⌘V) to play or open it; `ytmusicfast://` links
 - Song-change notifications, the system Share sheet, launch at login, VoiceOver, a search field in Settings
-- Undo on removals, an "Already added" warning, remove songs from your listening history
+- Undo on removals (also from Edit → Undo), an "Already added" warning, remove songs from your listening history
 - A dark design tinted by each cover — or light, or following the system; **English and Spanish**
 
 ## Fast and dependable
 
 - **Opens instantly** — Home, Your Library and pages you've visited show last time's copy at once (also offline)
 - **Songs you've played start in under half a second**, new ones in about two (mostly the download);
-  the next one is ready before the current one ends; skips fade without clicks; skipping through many songs quickly loads only the one you stop on
+  the next one is ready before the current one ends; skips fade without clicks; skipping through many songs quickly loads only the one you stop on;
+  play buttons show a spinner from the click, then pause while the music plays
 - **Keeps playing** — recovers from stalls and dropped connections, uses a lighter stream on slow networks and in
   Low Data Mode, pauses when your headphones disconnect, and picks up where you left off after a restart
 - **Keeps working** when YouTube changes things: a backup client list in [`clients.json`](../clients.json) fixes every

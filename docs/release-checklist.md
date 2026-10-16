@@ -87,6 +87,15 @@ Run through this with the release build before publishing (about 30 minutes).
 - [ ] A music video in full screen keeps thin bars by default; ⚙︎ → Fill screen fills the screen (a 4:3 video
       keeps its bars); View → Go to Playing Album works while a video plays.
 
+## Casting
+- [ ] Connect lists the Cast devices on the network, or says "No Cast devices found" and keeps looking.
+- [ ] Cast to a TV: it plays through the TV's YouTube app; play/pause, seek, next and volume respond at once; the
+      progress bar matches the TV's length; the next song follows without a gap on the TV.
+- [ ] Video mode while casting: the TV shows the music video full screen with lyrics over it; the lyrics button
+      turns them off and on; the Mac shows no video.
+- [ ] Turn off "Use the TV's YouTube app" in Connect: the Mac streams instead. A local file always streams from the Mac.
+- [ ] Press next ten times quickly while casting: the TV ends on the right song.
+
 ## Account sync and privacy
 - [ ] Signed in: a song played here appears in music.youtube.com/history; nothing does in a private session.
 - [ ] Listen together: a second Mac asking to join gets an "Allow" prompt on the host.
