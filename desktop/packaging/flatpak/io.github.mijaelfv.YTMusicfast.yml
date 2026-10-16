@@ -153,7 +153,7 @@ modules:
           install -Dm644 packaging/icons/hicolor/${size}x${size}/apps/${FLATPAK_ID}.png \
             -t ${FLATPAK_DEST}/share/icons/hicolor/${size}x${size}/apps
         done
-      - install -Dm644 LICENSE -t ${FLATPAK_DEST}/share/licenses/${FLATPAK_ID}
+      - install -Dm644 LICENSE packaging/licenses/* -t ${FLATPAK_DEST}/share/licenses/${FLATPAK_ID}
     sources:
       - type: dir
         path: ../..

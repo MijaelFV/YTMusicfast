@@ -92,7 +92,7 @@ for path in "${bundled[@]}"; do
   }
   install -D -m 644 "/usr/share/doc/$package/copyright" "$appdir/usr/share/doc/$package/copyright"
 done
-install -D -m 644 "$DESKTOP_DIR/../LICENSE" "$appdir/usr/share/doc/$MAIN_EXE/LICENSE"
+install -D -m 644 "$DESKTOP_DIR/../LICENSE" "$PACKAGING_DIR"/licenses/* -t "$appdir/usr/share/doc/$MAIN_EXE/"
 
 # The AppImage's own entry point, desktop entry, icon and AppStream metadata.
 cat > "$appdir/AppRun" << EOF

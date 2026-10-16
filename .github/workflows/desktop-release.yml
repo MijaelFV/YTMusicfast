@@ -217,8 +217,9 @@ jobs:
             jq . releases.win.json
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          unzip -l "$PACK_ID-$version-full.nupkg" | grep -q 'lib/app/libmpv-2.dll' || { echo "::error::libmpv-2.dll isn't in the package"; exit 1; }
-          unzip -l "$PACK_ID-$version-full.nupkg" | grep -q 'lib/app/ytmusicfast.exe' || { echo "::error::ytmusicfast.exe isn't in the package"; exit 1; }
+          for file in ytmusicfast.exe libmpv-2.dll licenses/LICENSE.txt licenses/THIRD-PARTY-NOTICES.txt; do
+            unzip -l "$PACK_ID-$version-full.nupkg" | grep -qF "lib/app/$file" || { echo "::error::$file isn't in the package"; exit 1; }
+          done
 
       - uses: actions/upload-artifact@v7.0.2
         with:
@@ -322,7 +323,8 @@ jobs:
           "publish/$PACK_ID.AppImage" --appimage-extract > /dev/null
           root=squashfs-root
           # Velopack finds its updater and the app's manifest next to the binary.
-          for file in usr/bin/$MAIN_EXE usr/bin/UpdateNix usr/bin/sq.version usr/lib/libmpv.so.2 AppRun "$APP_ID.desktop"; do
+          for file in usr/bin/$MAIN_EXE usr/bin/UpdateNix usr/bin/sq.version usr/lib/libmpv.so.2 AppRun "$APP_ID.desktop" \
+            usr/share/doc/$MAIN_EXE/LICENSE usr/share/doc/$MAIN_EXE/THIRD-PARTY-NOTICES.txt; do
             [[ -e "$root/$file" ]] || { echo "::error::the AppImage has no $file"; exit 1; }
           done
           [[ "$(patchelf --print-rpath "$root/usr/bin/$MAIN_EXE")" == '$ORIGIN/../lib' ]] || { echo "::error::wrong RUNPATH"; exit 1; }

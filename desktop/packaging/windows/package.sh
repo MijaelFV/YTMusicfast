@@ -43,6 +43,9 @@ else
   echo "::warning::$SIGNIN_EXE.exe wasn't built; packaging without the sign-in helper"
 fi
 check_update_hook "$stage/$MAIN_EXE.exe"
+mkdir "$stage/licenses"
+cp "$PACKAGING_DIR"/licenses/* "$stage/licenses/"
+cp "$DESKTOP_DIR/../LICENSE" "$stage/licenses/LICENSE.txt"
 
 # Explorer, the taskbar and the shortcuts Velopack creates show the exe's own icon and
 # description; `vpk --icon` only covers Setup.exe and the uninstaller.
