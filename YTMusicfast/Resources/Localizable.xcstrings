@@ -463,6 +463,26 @@
         }
       }
     },
+    "A Chromecast or Google TV plays on its own and this Mac can sleep. Off: this Mac streams to the TV. Each TV can be changed in the Connect panel.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un Chromecast o Google TV reproduce por su cuenta y esta Mac puede dormir. Desactivado: esta Mac transmite al televisor. Cada televisor se puede cambiar en el panel Conectar."
+          }
+        }
+      }
+    },
+    "Casting": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transmisión"
+          }
+        }
+      }
+    },
     "Close the rail, then leave": {
       "localizations": {
         "es": {
@@ -503,6 +523,36 @@
         }
       }
     },
+    "Lyrics on %@, streaming from this Mac": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Letra en %@, transmitiendo desde esta Mac"
+          }
+        }
+      }
+    },
+    "Lyrics on the TV": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Letra en el televisor"
+          }
+        }
+      }
+    },
+    "Play through the TV's YouTube app": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reproducir con la app de YouTube del televisor"
+          }
+        }
+      }
+    },
     "Show lyrics on the TV": {
       "localizations": {
         "es": {
@@ -513,32 +563,32 @@
         }
       }
     },
-    "Show lyrics on the TV when casting": {
+    "Streams from this Mac instead of the TV's YouTube app": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mostrar la letra en el televisor al transmitir"
+            "value": "Transmite desde esta Mac en lugar de la app de YouTube del televisor"
           }
         }
       }
     },
-    "Synced lyrics appear as captions over music videos (Video mode) on a Chromecast or Google TV, when this Mac streams to it (the TV's YouTube app off). Also in the Connect panel.": {
+    "Synced lyrics appear as captions over music videos (Video mode) when this Mac streams to the TV. Also in the ⚙︎ menu while casting.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "La letra sincronizada aparece como subtítulos sobre los videos musicales (modo Video) en un Chromecast o Google TV, cuando esta Mac le transmite (con la app de YouTube del televisor desactivada). También en el panel Conectar."
+            "value": "La letra sincronizada aparece como subtítulos sobre los videos musicales (modo Video) cuando esta Mac transmite al televisor. También en el menú ⚙︎ al transmitir."
           }
         }
       }
     },
-    "Synced lyrics appear as captions over music videos (Video mode).": {
+    "Video options": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "La letra sincronizada aparece como subtítulos sobre los videos musicales (modo Video)."
+            "value": "Opciones de video"
           }
         }
       }

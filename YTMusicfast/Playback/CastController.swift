@@ -151,12 +151,33 @@ final class CastController {
         var media: [String: Any]
     }
 
-    /// Synced lyrics as captions over music videos on a TV (Settings → Playback).
+    /// Synced lyrics as captions over music videos on a TV (Settings → Casting, the ⚙︎ video menu).
+    /// Only when this Mac streams to it: the TV's YouTube app plays without them.
     var lyricsOnTV = UserDefaults.standard.object(forKey: "castLyrics") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(lyricsOnTV, forKey: "castLyrics")
             lyricsSettingChanged()
         }
+    }
+
+    /// Casting a music video to a TV: the ⚙︎ video menu offers its lyrics.
+    var castsVideoToTV: Bool {
+        holdsPlayback && device?.isSpeaker == false && PlayerController.shared.current.map(castsVideo) == true
+    }
+
+    /// Showing on the TV now: on, and this Mac streams to it.
+    var showsLyricsOnTV: Bool {
+        guard lyricsOnTV, let device else { return false }
+        return !TVYouTubeApp.shared.isOn(for: device)
+    }
+
+    /// The ⚙︎ video menu's "Lyrics on the TV". The TV's YouTube app can't show them, so turning
+    /// them on there has this Mac stream to that TV from now on.
+    func setLyricsOnTV(_ on: Bool) {
+        lyricsOnTV = on
+        guard on, let device, TVYouTubeApp.shared.isOn(for: device) else { return }
+        TVYouTubeApp.shared.set(false, for: device)
+        Router.shared.showToast(String(localized: "Lyrics on \(device.name), streaming from this Mac"), icon: "music.mic")
     }
 
     /// Lyrics go to the device: the setting is on and it's a TV.

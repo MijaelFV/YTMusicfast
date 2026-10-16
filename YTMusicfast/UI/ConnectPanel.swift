@@ -50,12 +50,6 @@ struct ConnectPanel: View {
                         CastSwitch(title: String(localized: "Use the TV's YouTube app"),
                                    help: String(localized: "On: the TV's YouTube app plays the music, with the TV's YouTube account, and this Mac can sleep. Off: this Mac streams to the TV."),
                                    isOn: Binding(get: { youTubeApp }, set: { TVYouTubeApp.shared.set($0, for: device) }))
-                        // Lyrics go as captions from this Mac's stream; the YouTube app shows its own.
-                        if !youTubeApp {
-                            CastSwitch(title: String(localized: "Show lyrics on the TV"),
-                                       help: String(localized: "Synced lyrics appear as captions over music videos (Video mode)."),
-                                       isOn: Binding(get: { cast.lyricsOnTV }, set: { cast.lyricsOnTV = $0 }))
-                        }
                         Spacer().frame(height: 12)
                     }
                     let casting = cast.device != nil
@@ -169,7 +163,7 @@ struct ConnectPanel: View {
 }
 
 /// A setting for the TV playing now, under its card: whether it plays through its own YouTube app
-/// (see `TVYouTubeApp`), lyrics over its music videos.
+/// (see `TVYouTubeApp`).
 private struct CastSwitch: View {
     var title: String
     var help: String

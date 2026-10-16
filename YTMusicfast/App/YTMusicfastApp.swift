@@ -631,6 +631,7 @@ private struct GeneralSettings: View {
     @Bindable private var player = PlayerController.shared
     @Bindable private var video = VideoController.shared
     @Bindable private var cast = CastController.shared
+    @Bindable private var tvYouTubeApp = TVYouTubeApp.shared
     @Bindable private var eq = Equalizer.shared
     @AppStorage("audioQuality") private var audioQuality = "high"
     @AppStorage(AppAppearance.key) private var appearance = AppAppearance.dark
@@ -751,12 +752,6 @@ private struct GeneralSettings: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    Toggle("Show lyrics on the TV when casting", isOn: $cast.lyricsOnTV)
-                    Text("Synced lyrics appear as captions over music videos (Video mode) on a Chromecast or Google TV, when this Mac streams to it (the TV's YouTube app off). Also in the Connect panel.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
                 NotificationToggle()
                 LabeledContent("Balance") {
                     HStack(spacing: 8) {
@@ -769,6 +764,21 @@ private struct GeneralSettings: View {
                 Toggle("Mono audio", isOn: $eq.mono)
             }
             .id("playback")
+            Section("Casting") {
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Play through the TV's YouTube app", isOn: $tvYouTubeApp.byDefault)
+                    Text("A Chromecast or Google TV plays on its own and this Mac can sleep. Off: this Mac streams to the TV. Each TV can be changed in the Connect panel.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Show lyrics on the TV", isOn: $cast.lyricsOnTV)
+                    Text("Synced lyrics appear as captions over music videos (Video mode) when this Mac streams to the TV. Also in the ⚙︎ menu while casting.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .id("casting")
             Section("Menu bar") {
                 Toggle("Show YT Musicfast in the menu bar", isOn: $showMenuBarIcon)
                 Toggle("Show the song's name next to the icon", isOn: $showMenuBarTitle)

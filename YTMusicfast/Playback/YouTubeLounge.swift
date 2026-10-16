@@ -5,14 +5,26 @@ import os
 private let loungeLog = Logger(subsystem: "dev.ytmusicfast", category: "Lounge")
 
 /// Which TVs play through their own YouTube app instead of this Mac's media server, so this Mac
-/// can sleep while they play: every TV, unless turned off for it (the Connect panel's switch).
-/// When the YouTube app doesn't start or pair, this Mac's stream takes over.
+/// can sleep while they play: as Settings → Casting says (on by default), unless changed for a TV
+/// (the Connect panel's switch). When the YouTube app doesn't start or pair, this Mac's stream
+/// takes over.
 @MainActor
 @Observable
 final class TVYouTubeApp {
     static let shared = TVYouTubeApp()
     private static let offKey = "castViaYouTubeAppOff"
+    private static let onKey = "castViaYouTubeAppOn"
+    private static let defaultKey = "castViaYouTubeApp"
+    /// TVs changed from the default, either way.
     private(set) var offIds = Set(UserDefaults.standard.stringArray(forKey: TVYouTubeApp.offKey) ?? [])
+    private(set) var onIds = Set(UserDefaults.standard.stringArray(forKey: TVYouTubeApp.onKey) ?? [])
+    /// For TVs not changed in the Connect panel (Settings → Casting).
+    var byDefault = UserDefaults.standard.object(forKey: TVYouTubeApp.defaultKey) as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(byDefault, forKey: Self.defaultKey)
+            if let device = CastController.shared.device { CastController.shared.youTubeAppSettingChanged(for: device) }
+        }
+    }
     /// For this cast only: a file on this Mac came up, which the TV's YouTube app can't play, so
     /// this Mac's stream took over until casting ends.
     private(set) var suspendedId: String?
@@ -21,18 +33,22 @@ final class TVYouTubeApp {
 
     /// Speakers have no YouTube app.
     func isOn(for device: CastDevice) -> Bool {
-        !device.isSpeaker && !offIds.contains(device.id) && suspendedId != device.id
+        guard !device.isSpeaker, suspendedId != device.id else { return false }
+        return onIds.contains(device.id) || (byDefault && !offIds.contains(device.id))
     }
 
     func set(_ on: Bool, for device: CastDevice) {
         guard on != isOn(for: device), !device.isSpeaker || !on else { return }
         if on {
             offIds.remove(device.id)
+            onIds.insert(device.id)
             suspendedId = nil
         } else {
+            onIds.remove(device.id)
             offIds.insert(device.id)
         }
         UserDefaults.standard.set(offIds.sorted(), forKey: Self.offKey)
+        UserDefaults.standard.set(onIds.sorted(), forKey: Self.onKey)
         CastController.shared.youTubeAppSettingChanged(for: device)
     }
 

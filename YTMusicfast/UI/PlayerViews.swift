@@ -1752,25 +1752,42 @@ private struct ShareCurrentButton: View {
 }
 
 /// YouTube's Quality menu for the music video: Auto (and what it's showing now), or a fixed
-/// size. Only while a video is what's shown.
+/// size. Only while a video is what's shown. Casting it to a TV, the TV picks the size; the menu
+/// has the lyrics on the TV instead.
 struct VideoQualityButton: View {
     /// See `MenuButton.openSignal`.
     var openSignal = 0
     private var video: VideoController { .shared }
+    private var cast: CastController { .shared }
 
     var body: some View {
-        if video.videoMode, PlayerController.shared.current?.isVideo == true, !video.availableHeights.isEmpty {
-            MenuButton(alignment: .trailing, entries: { entries }) { open in
-                Image(systemName: "gearshape")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(open ? Theme.text : Theme.secondary)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .opening(on: openSignal)
-            .tooltip(String(localized: "Video quality"), edge: .bottom)
-            .accessibilityLabel("Video quality")
+        if cast.castsVideoToTV {
+            button(entries: { castEntries }, label: String(localized: "Video options"))
+        } else if video.videoMode, PlayerController.shared.current?.isVideo == true, !video.availableHeights.isEmpty {
+            button(entries: { entries }, label: String(localized: "Video quality"))
         }
+    }
+
+    private func button(entries: @escaping () -> [MenuEntry], label: String) -> some View {
+        MenuButton(alignment: .trailing, entries: entries) { open in
+            Image(systemName: "gearshape")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(open ? Theme.text : Theme.secondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .opening(on: openSignal)
+        .tooltip(label, edge: .bottom)
+        .accessibilityLabel(label)
+    }
+
+    private var castEntries: [MenuEntry] {
+        guard let device = cast.device else { return [] }
+        let showing = cast.showsLyricsOnTV
+        return [.header(String(localized: "Playing on \(device.name)")),
+                .item(String(localized: "Lyrics on the TV"),
+                      subtitle: TVYouTubeApp.shared.isOn(for: device) ? String(localized: "Streams from this Mac instead of the TV's YouTube app") : nil,
+                      systemImage: "music.mic", checked: showing) { cast.setLyricsOnTV(!showing) }]
     }
 
     private var entries: [MenuEntry] {
