@@ -5,9 +5,10 @@ import os
 private let loungeLog = Logger(subsystem: "dev.ytmusicfast", category: "Lounge")
 
 /// Which TVs play through their own YouTube app instead of this Mac's media server, so this Mac
-/// can sleep while they play: as Settings → Casting says (on by default), unless changed for a TV
-/// (the Connect panel's switch). When the YouTube app doesn't start or pair, this Mac's stream
-/// takes over.
+/// can sleep while they play: as Settings → Casting says (off by default), unless changed for a TV
+/// (the Connect panel's switch). Off by default because the TV's YouTube app plays what a remote
+/// sends as that remote's account, and this one has none: the TV shows ads, even signed in to
+/// Premium itself. When the YouTube app doesn't start or pair, this Mac's stream takes over.
 @MainActor
 @Observable
 final class TVYouTubeApp {
@@ -19,7 +20,7 @@ final class TVYouTubeApp {
     private(set) var offIds = Set(UserDefaults.standard.stringArray(forKey: TVYouTubeApp.offKey) ?? [])
     private(set) var onIds = Set(UserDefaults.standard.stringArray(forKey: TVYouTubeApp.onKey) ?? [])
     /// For TVs not changed in the Connect panel (Settings → Casting).
-    var byDefault = UserDefaults.standard.object(forKey: TVYouTubeApp.defaultKey) as? Bool ?? true {
+    var byDefault = UserDefaults.standard.object(forKey: TVYouTubeApp.defaultKey) as? Bool ?? false {
         didSet {
             UserDefaults.standard.set(byDefault, forKey: Self.defaultKey)
             if let device = CastController.shared.device { CastController.shared.youTubeAppSettingChanged(for: device) }

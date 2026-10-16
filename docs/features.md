@@ -57,10 +57,10 @@ What YouTube Music on the web doesn't offer:
   shown at and your connection, or fixed from the ⚙︎ **Video quality** menu (which, in full screen, can also make a
   video fill the screen)
 - **Play anywhere** — **Google Cast** (Chromecast, Google TV, Nest), **AirPlay** (HomePod, Apple TV, smart TVs) and any
-  speaker or headphones from the Connect panel. A TV plays through its own YouTube app (Settings → Casting, and
-  a switch per TV in Connect; this Mac streams instead if the app can't start, and for your own files), so the
-  Mac can sleep while the TV goes on through the queue. In Video mode the TV plays the music video full screen;
-  **Lyrics on the TV** in the ⚙︎ menu adds synced lyrics over it, streaming from this Mac
+  speaker or headphones from the Connect panel. A TV plays what this Mac streams, without ads; or, if you turn it
+  on (Settings → Casting, or per TV in Connect), through its own YouTube app, so the Mac can sleep while the TV
+  goes on through the queue (that plays without your account, so the TV may show ads). In Video mode the TV
+  plays the music video full screen; **Lyrics on the TV** in the ⚙︎ menu adds synced lyrics over it
 - **Thumbs up / down** — a thumbs down skips the song and plays less like it
 - Time-synced **lyrics**, **comments** (sort, replies, post), "Related" music, **podcasts** (Episodes for Later,
   resume where you stopped), **uploads** of your own songs, private session

@@ -767,7 +767,7 @@ private struct GeneralSettings: View {
             Section("Casting") {
                 VStack(alignment: .leading, spacing: 2) {
                     Toggle("Play through the TV's YouTube app", isOn: $tvYouTubeApp.byDefault)
-                    Text("A Chromecast or Google TV plays on its own and this Mac can sleep. Off: this Mac streams to the TV. Each TV can be changed in the Connect panel.")
+                    Text("A Chromecast or Google TV plays on its own and this Mac can sleep, but without your account, so the TV may show ads (even signed in to Premium). Off: this Mac streams to the TV, without ads. Each TV can be changed in the Connect panel.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

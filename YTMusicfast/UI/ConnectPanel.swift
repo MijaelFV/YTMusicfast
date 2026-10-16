@@ -48,7 +48,7 @@ struct ConnectPanel: View {
                     if let device = cast.device, !device.isSpeaker {
                         let youTubeApp = TVYouTubeApp.shared.isOn(for: device)
                         CastSwitch(title: String(localized: "Use the TV's YouTube app"),
-                                   help: String(localized: "On: the TV's YouTube app plays the music, with the TV's YouTube account, and this Mac can sleep. Off: this Mac streams to the TV."),
+                                   help: String(localized: "On: the TV's YouTube app plays the music and this Mac can sleep, but without your account, so the TV may show ads. Off: this Mac streams to the TV, without ads."),
                                    isOn: Binding(get: { youTubeApp }, set: { TVYouTubeApp.shared.set($0, for: device) }))
                         Spacer().frame(height: 12)
                     }

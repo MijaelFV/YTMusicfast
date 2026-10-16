@@ -463,12 +463,12 @@
         }
       }
     },
-    "A Chromecast or Google TV plays on its own and this Mac can sleep. Off: this Mac streams to the TV. Each TV can be changed in the Connect panel.": {
+    "A Chromecast or Google TV plays on its own and this Mac can sleep, but without your account, so the TV may show ads (even signed in to Premium). Off: this Mac streams to the TV, without ads. Each TV can be changed in the Connect panel.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Un Chromecast o Google TV reproduce por su cuenta y esta Mac puede dormir. Desactivado: esta Mac transmite al televisor. Cada televisor se puede cambiar en el panel Conectar."
+            "value": "Un Chromecast o Google TV reproduce por su cuenta y esta Mac puede dormir, pero sin tu cuenta, así que el televisor puede mostrar anuncios (aunque tenga Premium). Desactivado: esta Mac transmite al televisor, sin anuncios. Cada televisor se puede cambiar en el panel Conectar."
           }
         }
       }
@@ -539,6 +539,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Letra en el televisor"
+          }
+        }
+      }
+    },
+    "On: the TV's YouTube app plays the music and this Mac can sleep, but without your account, so the TV may show ads. Off: this Mac streams to the TV, without ads.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activado: la app de YouTube del televisor reproduce la música y esta Mac puede dormir, pero sin tu cuenta, así que el televisor puede mostrar anuncios. Desactivado: esta Mac transmite al televisor, sin anuncios."
           }
         }
       }
@@ -8590,16 +8600,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Usar la app de YouTube del televisor"
-          }
-        }
-      }
-    },
-    "On: the TV's YouTube app plays the music, with the TV's YouTube account, and this Mac can sleep. Off: this Mac streams to the TV.": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Activado: la app de YouTube del televisor reproduce la música, con la cuenta de YouTube del televisor, y esta Mac puede dormir. Desactivado: esta Mac transmite al televisor."
           }
         }
       }

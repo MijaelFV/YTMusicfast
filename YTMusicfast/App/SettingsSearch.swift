@@ -34,7 +34,7 @@ struct SettingsEntry: Identifiable {
             SettingsEntry(title: String(localized: "Show a notification when the song changes"), keywords: "banner alert", tab: "general", section: "playback"),
             SettingsEntry(title: String(localized: "Balance"), keywords: "left right pan channel", tab: "general", section: "playback"),
             SettingsEntry(title: String(localized: "Mono audio"), keywords: "stereo channel", tab: "general", section: "playback"),
-            SettingsEntry(title: String(localized: "Play through the TV's YouTube app"), keywords: "cast chromecast google tv sleep stream", tab: "general", section: "casting"),
+            SettingsEntry(title: String(localized: "Play through the TV's YouTube app"), keywords: "cast chromecast google tv sleep stream ads", tab: "general", section: "casting"),
             SettingsEntry(title: String(localized: "Show lyrics on the TV"), keywords: "cast chromecast google tv captions subtitles", tab: "general", section: "casting"),
             SettingsEntry(title: String(localized: "Show YT Musicfast in the menu bar"), keywords: "status icon tray", tab: "general", section: "menubar"),
             SettingsEntry(title: String(localized: "Global shortcuts"), keywords: "hotkeys keyboard", tab: "general", section: "shortcuts"),
