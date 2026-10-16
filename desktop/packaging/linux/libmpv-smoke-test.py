@@ -42,9 +42,14 @@ class EndFile(ctypes.Structure):
     _fields_ = [("reason", ctypes.c_int), ("error", ctypes.c_int)]
 
 
+class LogMessage(ctypes.Structure):
+    _fields_ = [("prefix", c_char_p), ("level", c_char_p), ("text", c_char_p)]
+
+
 mpv.mpv_wait_event.argtypes = [c_void_p, ctypes.c_double]
 mpv.mpv_wait_event.restype = ctypes.POINTER(Event)
-START_FILE, END_FILE, FILE_LOADED = 6, 7, 8
+SHUTDOWN, LOG_MESSAGE, START_FILE, END_FILE, FILE_LOADED = 1, 2, 6, 7, 8
+mpv.mpv_request_log_messages.argtypes = [c_void_p, c_char_p]
 END_FILE_EOF = 0
 
 
@@ -54,9 +59,11 @@ def check(status, what):
 
 handle = mpv.mpv_create()
 assert handle, "mpv_create failed"
-for name, value in [("vo", "null"), ("ao", "null"), ("terminal", "no"), ("idle", "no")]:
+for name, value in [("vo", "null"), ("ao", "null"), ("terminal", "no"), ("idle", "yes")]:
     check(mpv.mpv_set_option_string(handle, name.encode(), value.encode()), f"set {name}")
 check(mpv.mpv_initialize(handle), "mpv_initialize")
+# mpv's own messages (verbose with MPV_SMOKE_LOG=v), to see why something fails.
+check(mpv.mpv_request_log_messages(handle, os.environ.get("MPV_SMOKE_LOG", "info").encode()), "log messages")
 
 raw = mpv.mpv_get_property_string(handle, b"protocol-list")
 assert raw, "no protocol-list property"
@@ -93,7 +100,11 @@ seen = set()
 while True:
     event = mpv.mpv_wait_event(handle, 10).contents
     assert event.event_id != 0, "timed out waiting for playback to finish"
+    assert event.event_id != SHUTDOWN, "mpv shut down"
     seen.add(event.event_id)
+    if event.event_id == LOG_MESSAGE:
+        message = ctypes.cast(event.data, ctypes.POINTER(LogMessage)).contents
+        print(f"  mpv [{message.prefix.decode()}] {message.level.decode()}: {message.text.decode().rstrip()}")
     if event.event_id == END_FILE:
         end = ctypes.cast(event.data, ctypes.POINTER(EndFile)).contents
         assert end.reason == END_FILE_EOF, f"playback ended with reason {end.reason}, error {end.error}"

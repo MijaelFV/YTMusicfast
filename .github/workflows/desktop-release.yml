@@ -448,7 +448,9 @@ jobs:
           "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/flatpak-cargo-generator.py" desktop/Cargo.lock \
             -o desktop/packaging/flatpak/cargo-sources.json
 
-      - uses: actions/cache@v6.1.0
+      # flatpak-builder's cache of built modules (mpv and FFmpeg take most of the build), saved
+      # right after the build so a failing check doesn't throw it away.
+      - uses: actions/cache/restore@v6.1.0
         with:
           path: .flatpak-builder
           key: flatpak-${{ hashFiles('desktop/packaging/flatpak/*.yml') }}-${{ hashFiles('desktop/Cargo.lock') }}
@@ -463,6 +465,11 @@ jobs:
           mkdir -p publish
           flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
             repo "publish/YTMusicfast-$version-x86_64.flatpak" "$APP_ID"
+
+      - uses: actions/cache/save@v6.1.0
+        with:
+          path: .flatpak-builder
+          key: flatpak-${{ hashFiles('desktop/packaging/flatpak/*.yml') }}-${{ hashFiles('desktop/Cargo.lock') }}
 
       - name: Check the Flatpak
         run: |
