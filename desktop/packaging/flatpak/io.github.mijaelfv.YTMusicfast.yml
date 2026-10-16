@@ -78,6 +78,7 @@ modules:
       - --disable-encoders
       - --disable-muxers
       - --disable-devices
+      - --disable-avdevice
       - --enable-gnutls
       - --enable-libdav1d
     cleanup:

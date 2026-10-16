@@ -510,7 +510,7 @@ jobs:
             echo '```'
             ls -l publish
             echo
-            (cd build/files && find . -type f -o -type l | sort)
+            (cd build/files && find . -path ./lib/debug -prune -o \( -type f -o -type l \) -print | sort)
             echo
             cat build/metadata
             echo '```'
