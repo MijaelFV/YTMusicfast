@@ -46,8 +46,17 @@ struct ConnectPanel: View {
                     currentCard
                         .padding(.bottom, cast.device?.isSpeaker == false ? 4 : 18)
                     if let device = cast.device, !device.isSpeaker {
-                        YouTubeAppSwitch(device: device)
-                            .padding(.bottom, 12)
+                        let youTubeApp = TVYouTubeApp.shared.isOn(for: device)
+                        CastSwitch(title: String(localized: "Use the TV's YouTube app"),
+                                   help: String(localized: "On: the TV's YouTube app plays the music, with the TV's YouTube account, and this Mac can sleep. Off: this Mac streams to the TV."),
+                                   isOn: Binding(get: { youTubeApp }, set: { TVYouTubeApp.shared.set($0, for: device) }))
+                        // Lyrics go as captions from this Mac's stream; the YouTube app shows its own.
+                        if !youTubeApp {
+                            CastSwitch(title: String(localized: "Show lyrics on the TV"),
+                                       help: String(localized: "Synced lyrics appear as captions over music videos (Video mode)."),
+                                       isOn: Binding(get: { cast.lyricsOnTV }, set: { cast.lyricsOnTV = $0 }))
+                        }
+                        Spacer().frame(height: 12)
                     }
                     let casting = cast.device != nil
                     if player.outputDeviceUID != nil || player.isAirPlaying || casting {
@@ -159,13 +168,16 @@ struct ConnectPanel: View {
     }
 }
 
-/// Whether a TV plays through its own YouTube app (see `TVYouTubeApp`), under the TV playing now.
-private struct YouTubeAppSwitch: View {
-    var device: CastDevice
+/// A setting for the TV playing now, under its card: whether it plays through its own YouTube app
+/// (see `TVYouTubeApp`), lyrics over its music videos.
+private struct CastSwitch: View {
+    var title: String
+    var help: String
+    @Binding var isOn: Bool
 
     var body: some View {
-        Toggle(isOn: Binding(get: { TVYouTubeApp.shared.isOn(for: device) }, set: { TVYouTubeApp.shared.set($0, for: device) })) {
-            Text("Use the TV's YouTube app")
+        Toggle(isOn: $isOn) {
+            Text(title)
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -173,7 +185,7 @@ private struct YouTubeAppSwitch: View {
         .toggleStyle(.switch)
         .controlSize(.mini)
         .tint(Theme.accent)
-        .help(String(localized: "On: the TV's YouTube app plays the music, with the TV's YouTube account, and this Mac can sleep. Off: this Mac streams to the TV."))
+        .help(help)
         .padding(.horizontal, 16)
         .padding(.vertical, 2)
     }

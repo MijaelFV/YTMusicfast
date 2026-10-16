@@ -110,7 +110,7 @@ final class VideoController {
             return
         }
         // Casting: the TV shows the video; downloading and decoding it here too would be wasted.
-        guard videoMode, surfaces > 0, !CastController.shared.isActive,
+        guard videoMode, surfaces > 0, !CastController.shared.holdsPlayback,
               let track = PlayerController.shared.current, track.isVideo, !track.isLocal else {
             if loadedVideoId != nil {
                 videoLog.notice("refresh: stop (videoMode \(self.videoMode), surfaces \(self.surfaces), video \(PlayerController.shared.current?.isVideo == true))")

@@ -188,8 +188,6 @@ final class TVPlayerState {
 
     func toggleLyrics() {
         wake()
-        // Casting a music video to a TV: the lyrics go on or off there.
-        if CastController.shared.lyricsButtonsControlTV { CastController.shared.toggleLyricsOnTV(); return }
         withAnimation(.spring(duration: 0.5, bounce: 0.1)) { showsLyrics.toggle() }
     }
 
@@ -786,9 +784,7 @@ struct FullPlayerView: View {
                                         active: player.likeStatus == .like, label: String(localized: "Like"))
                     }
                     Spacer()
-                    TVControlButton(control: .lyrics, systemImage: "music.mic",
-                                    active: CastController.shared.lyricsButtonsControlTV ? CastController.shared.lyricsOnTV : tv.showsLyrics,
-                                    label: String(localized: "Lyrics (L)"))
+                    TVControlButton(control: .lyrics, systemImage: "music.mic", active: tv.showsLyrics, label: String(localized: "Lyrics (L)"))
                     TVControlButton(control: .rail, systemImage: "rectangle.stack", active: tv.showsRail, label: String(localized: "Up next (Q)"))
                     PlaybackOptionsMenu(openSignal: tv.menuSignals[.options] ?? 0).tvFocus(.control(.options))
                     TVSpeakerMenu(openSignal: tv.menuSignals[.speaker] ?? 0).tvFocus(.control(.speaker))

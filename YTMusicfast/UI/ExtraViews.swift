@@ -364,7 +364,7 @@ struct NowPlayingVisual: View {
         .animation(.easeInOut(duration: 0.4), value: video.hasVideo)
         // Casting: where it's playing, in place of a picture that's on the TV instead.
         .overlay(alignment: .bottom) {
-            if let device = CastController.shared.isActive ? CastController.shared.device : nil, fullScreen || size >= 200 {
+            if let device = CastController.shared.holdsPlayback ? CastController.shared.device : nil, fullScreen || size >= 200 {
                 Label(String(localized: "Playing on \(device.name)"), systemImage: device.symbol)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
@@ -375,7 +375,7 @@ struct NowPlayingVisual: View {
                     .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: CastController.shared.isActive)
+        .animation(.easeInOut(duration: 0.3), value: CastController.shared.holdsPlayback)
         .onAppear { video.surfaceAppeared() }
         .onDisappear { video.surfaceDisappeared() }
     }

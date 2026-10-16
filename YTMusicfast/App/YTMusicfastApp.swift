@@ -753,7 +753,7 @@ private struct GeneralSettings: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Toggle("Show lyrics on the TV when casting", isOn: $cast.lyricsOnTV)
-                    Text("Synced lyrics appear as captions over music videos (Video mode) on a Chromecast or Google TV.")
+                    Text("Synced lyrics appear as captions over music videos (Video mode) on a Chromecast or Google TV, when this Mac streams to it (the TV's YouTube app off). Also in the Connect panel.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

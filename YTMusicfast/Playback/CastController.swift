@@ -46,6 +46,11 @@ final class CastController {
     private(set) var state: State = .idle
     /// Playing on a Cast device (the player sends everything there).
     var isActive: Bool { device != nil && state == .connected }
+    /// Changing between the TV's YouTube app and the media receiver mid-cast (see
+    /// `youTubeAppSettingChanged`): connecting again, but the music stays with the TV.
+    private(set) var switchingApp = false
+    /// The TV has the music, or is about to again: nothing (the music video) plays on this Mac.
+    var holdsPlayback: Bool { isActive || (device != nil && switchingApp) }
 
     // Receiver playback, as last reported (positions are extrapolated in between).
     private(set) var remotePlaying = false
@@ -154,18 +159,6 @@ final class CastController {
         }
     }
 
-    /// Casting a music video to a TV: the lyrics buttons show or hide its captions there.
-    var lyricsButtonsControlTV: Bool {
-        isActive && device?.isSpeaker == false && PlayerController.shared.current.map(castsVideo) == true
-    }
-
-    func toggleLyricsOnTV() {
-        lyricsOnTV.toggle()
-        let name = device?.name ?? ""
-        Router.shared.showToast(lyricsOnTV ? String(localized: "Lyrics on \(name)") : String(localized: "Lyrics off on \(name)"),
-                                icon: "music.mic")
-    }
-
     /// Lyrics go to the device: the setting is on and it's a TV.
     var wantsLyrics: Bool { lyricsOnTV && device?.isSpeaker == false }
 
@@ -258,6 +251,7 @@ final class CastController {
         endYouTubeApp(pausingTV: connection == nil)
         viaYouTubeApp = false
         handOver = nil
+        switchingApp = false
         if let sessionId { send(Namespace.receiver, ["type": "STOP", "sessionId": sessionId], to: "receiver-0") }
         if let transportId { send(Namespace.connection, ["type": "CLOSE"], to: transportId) }
         heartbeat?.invalidate()
@@ -798,6 +792,7 @@ final class CastController {
         }
         let starting = state != .connected
         state = .connected
+        switchingApp = false
         if starting {
             if awake == nil {
                 awake = ProcessInfo.processInfo.beginActivity(options: .idleSystemSleepDisabled, reason: "Casting to \(device?.name ?? "a Cast device")")
@@ -965,6 +960,7 @@ final class CastController {
         }
         castLog.notice("switching to \(wanted == Lounge.castAppId ? "the TV's YouTube app" : "the media receiver", privacy: .public)")
         if state == .connected, PlayerController.shared.current != nil { handOver = (position, remotePlaying) }
+        switchingApp = true
         endYouTubeApp(pausingTV: false)
         viaYouTubeApp = false
         if let sessionId { send(Namespace.receiver, ["type": "STOP", "sessionId": sessionId], to: "receiver-0") }
@@ -1033,6 +1029,7 @@ final class CastController {
             castLog.notice("TV's YouTube app: paired")
             viaYouTubeApp = true
             state = .connected
+            switchingApp = false
             // Nothing keeps this Mac awake: the TV plays on without it.
             if let awake { ProcessInfo.processInfo.endActivity(awake) }
             awake = nil

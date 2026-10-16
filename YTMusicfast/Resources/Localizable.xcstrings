@@ -503,6 +503,46 @@
         }
       }
     },
+    "Show lyrics on the TV": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar la letra en el televisor"
+          }
+        }
+      }
+    },
+    "Show lyrics on the TV when casting": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar la letra en el televisor al transmitir"
+          }
+        }
+      }
+    },
+    "Synced lyrics appear as captions over music videos (Video mode) on a Chromecast or Google TV, when this Mac streams to it (the TV's YouTube app off). Also in the Connect panel.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La letra sincronizada aparece como subtítulos sobre los videos musicales (modo Video) en un Chromecast o Google TV, cuando esta Mac le transmite (con la app de YouTube del televisor desactivada). También en el panel Conectar."
+          }
+        }
+      }
+    },
+    "Synced lyrics appear as captions over music videos (Video mode).": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La letra sincronizada aparece como subtítulos sobre los videos musicales (modo Video)."
+          }
+        }
+      }
+    },
     "from %@": {
       "localizations": {
         "es": {
@@ -3970,26 +4010,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Letra (⌥⌘L)"
-          }
-        }
-      }
-    },
-    "Lyrics off on %@": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Letras desactivadas en %@"
-          }
-        }
-      }
-    },
-    "Lyrics on %@": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Letras en %@"
           }
         }
       }
