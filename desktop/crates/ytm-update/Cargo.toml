@@ -1,0 +1,19 @@
+[package]
+name = "ytm-update"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+log = "0.4.34"
+semver = "1.0.27"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+# Pinned: vpk (the packaging tool, in .github/workflows/desktop-release.yml) must be the same
+# version as this library. `public-utils` exposes its HTTP helpers for the release source below.
+# It needs zip ^8.6, and every zip 8.x was yanked after 9.0.1's extraction fixes, so Cargo.lock
+# pins the yanked 8.6.0 (`--locked` builds accept it). That is the zip Velopack's own Update.exe
+# and UpdateNix, which unpack the packages, are built with too; the packages it reads come from
+# this project's releases and are checked against the release feed's SHA-256 first. Move to zip 9
+# when Velopack does.
+velopack = { version = "=1.2.161", features = ["public-utils"] }
